@@ -1,0 +1,175 @@
+"""
+Singapore Ground Sense News Bot - Main Digest Runner
+Fetches from all sources, scores/ranks posts, generates and sends digest to Telegram.
+"""
+import logging
+import sys
+import os
+import requests
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BOT_LOG
+from sources import fetch_all_sources
+from scorer import rank_posts
+from digest import format_digest, format_digest_plain
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(BOT_LOG),
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+logger = logging.getLogger("bot")
+
+
+def send_telegram_message(text, parse_mode="MarkdownV2"):
+    """Send a message to the configured Telegram chat."""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN not set. Cannot send message.")
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": True,
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=30)
+        data = resp.json()
+        if data.get("ok"):
+            logger.info(f"Message sent successfully to chat {TELEGRAM_CHAT_ID}")
+            return True
+        else:
+            logger.error(f"Telegram API error: {data}")
+            # Try plain text fallback
+            if parse_mode != "HTML":
+                logger.info("Retrying with plain text...")
+                return send_telegram_message_plain(text)
+            return False
+    except Exception as e:
+        logger.error(f"Error sending Telegram message: {e}")
+        return False
+
+
+def send_telegram_message_plain(text):
+    """Send plain text message to Telegram (fallback)."""
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN not set.")
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # Strip markdown formatting for plain text
+    plain = text.replace("\\.", ".").replace("\\-", "-").replace("\\_", "_")
+    plain = plain.replace("\\!", "!").replace("\\(", "(").replace("\\)", ")")
+    plain = plain.replace("\\[", "[").replace("\\]", "]").replace("\\>", ">")
+    plain = plain.replace("\\#", "#").replace("\\+", "+").replace("\\=", "=")
+    plain = plain.replace("\\|", "|").replace("\\{", "{").replace("\\}", "}")
+    plain = plain.replace("\\~", "~").replace("\\`", "`").replace("\\*", "*")
+
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": plain,
+        "disable_web_page_preview": True,
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=30)
+        data = resp.json()
+        if data.get("ok"):
+            logger.info("Plain text message sent successfully.")
+            return True
+        else:
+            logger.error(f"Plain text send failed: {data}")
+            return False
+    except Exception as e:
+        logger.error(f"Error sending plain text message: {e}")
+        return False
+
+
+def split_and_send(text, max_length=4096):
+    """Split long messages and send in chunks."""
+    if len(text) <= max_length:
+        return send_telegram_message(text)
+
+    # Split by double newline (paragraph breaks)
+    parts = []
+    current = ""
+    for line in text.split("\n"):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line
+        else:
+            current += "\n" + line if current else line
+    if current:
+        parts.append(current)
+
+    success = True
+    for part in parts:
+        if not send_telegram_message(part):
+            success = False
+    return success
+
+
+def run_digest():
+    """Main digest pipeline: fetch, score, rank, format, send."""
+    logger.info("=" * 50)
+    logger.info("Starting Singapore Ground Sense digest run")
+    logger.info("=" * 50)
+
+    # Step 1: Fetch from all sources
+    logger.info("Step 1: Fetching from all sources...")
+    all_posts = fetch_all_sources()
+
+    if not all_posts:
+        logger.warning("No posts fetched from any source.")
+        msg = "⚠️ SG Ground Sense Bot: No posts could be fetched at this time. Please check source availability."
+        send_telegram_message_plain(msg)
+        return
+
+    logger.info(f"Total posts fetched: {len(all_posts)}")
+
+    # Step 2: Score and rank
+    logger.info("Step 2: Scoring and ranking posts...")
+    ranked = rank_posts(all_posts)
+    logger.info(f"Top {len(ranked)} posts selected for digest")
+
+    # Step 3: Format digest
+    logger.info("Step 3: Formatting digest...")
+    digest_text = format_digest(ranked)
+
+    # Step 4: Send to Telegram
+    logger.info("Step 4: Sending digest to Telegram...")
+    success = split_and_send(digest_text)
+
+    if success:
+        logger.info("Digest sent successfully!")
+    else:
+        logger.error("Failed to send digest via MarkdownV2, trying plain text...")
+        plain_digest = format_digest_plain(ranked)
+        split_and_send_plain(plain_digest)
+
+    logger.info("Digest run complete.")
+
+
+def split_and_send_plain(text, max_length=4096):
+    """Split and send plain text messages."""
+    parts = []
+    current = ""
+    for line in text.split("\n"):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line
+        else:
+            current += "\n" + line if current else line
+    if current:
+        parts.append(current)
+
+    for part in parts:
+        send_telegram_message_plain(part)
+
+
+if __name__ == "__main__":
+    run_digest()

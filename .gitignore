@@ -1,0 +1,18 @@
+# Environment / secrets
+.env
+*.env
+
+# Logs
+*.log
+bot.log
+listener.log
+
+# Runtime state
+.listener_offset
+users.json
+__pycache__/
+*.pyc
+*.pyo
+
+# Bot profile images (not needed in repo)
+bot_profile*.png

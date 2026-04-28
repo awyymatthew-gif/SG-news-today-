@@ -1,0 +1,65 @@
+services:
+  # Background worker — runs listener.py 24/7 for on-demand /digest commands
+  - type: worker
+    name: sg-news-bot-listener
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python listener.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false   # Set manually in Render dashboard
+      - key: TELEGRAM_CHAT_ID
+        sync: false   # Set manually in Render dashboard
+      - key: ADMIN_CHAT_ID
+        sync: false   # Set manually in Render dashboard
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  # Cron job — Morning digest at 8:00 AM SGT (00:00 UTC)
+  - type: cron
+    name: sg-news-digest-morning
+    runtime: python
+    plan: starter
+    schedule: "0 0 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  # Cron job — Midday digest at 12:00 PM SGT (04:00 UTC)
+  - type: cron
+    name: sg-news-digest-midday
+    runtime: python
+    plan: starter
+    schedule: "0 4 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  # Cron job — Evening digest at 9:00 PM SGT (13:00 UTC)
+  - type: cron
+    name: sg-news-digest-evening
+    runtime: python
+    plan: starter
+    schedule: "0 13 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
