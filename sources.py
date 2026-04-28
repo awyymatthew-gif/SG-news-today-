@@ -220,6 +220,47 @@ def fetch_telegram_channels():
     return posts
 
 
+def fetch_mothership():
+    """Fetch latest articles from Mothership.sg via RSS feed."""
+    posts = []
+    cutoff = get_cutoff_time()
+    try:
+        url = "https://mothership.sg/feed/"
+        headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        items = root.findall(".//item")
+        count = 0
+        for item in items[:20]:
+            title = (item.findtext("title") or "").strip()
+            link  = (item.findtext("link")  or "").strip()
+            pub_date = item.findtext("pubDate") or ""
+            created_utc = time.time()
+            if pub_date:
+                try:
+                    import email.utils
+                    created_utc = email.utils.parsedate_to_datetime(pub_date).timestamp()
+                except Exception:
+                    pass
+            if created_utc < cutoff:
+                continue
+            posts.append({
+                "source": "Mothership",
+                "title": title,
+                "url": link,
+                "score": 0,
+                "comments": 0,
+                "created_utc": created_utc,
+                "text": title,
+            })
+            count += 1
+        logger.info(f"Fetched {count} articles from Mothership RSS")
+    except Exception as e:
+        logger.error(f"Error fetching Mothership RSS: {e}")
+    return posts
+
+
 def fetch_all_sources():
     """Fetch posts from all configured sources."""
     all_posts = []
@@ -238,6 +279,11 @@ def fetch_all_sources():
     tg_posts = fetch_telegram_channels()
     all_posts.extend(tg_posts)
     logger.info(f"Telegram channels: {len(tg_posts)} posts")
+
+    logger.info("Fetching from Mothership RSS...")
+    ms_posts = fetch_mothership()
+    all_posts.extend(ms_posts)
+    logger.info(f"Mothership: {len(ms_posts)} posts")
 
     logger.info(f"Total posts fetched: {len(all_posts)}")
     return all_posts

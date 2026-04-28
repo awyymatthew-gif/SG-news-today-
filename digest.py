@@ -15,6 +15,7 @@ SOURCE_LABELS = {
     "straitstimes":   "ST",
     "govsg":          "Gov.sg",
     "mothership_sg":  "Mothership",
+    "mothership":     "Mothership",
     "hwz":            "HWZ",
     "hardwarezone":   "HWZ",
     "r/singapore":    "Reddit SG",
@@ -46,7 +47,7 @@ def format_digest(ranked_posts):
     date_str = now_sgt.strftime("%-d %b")
 
     lines = []
-    lines.append(f"🇸🇬 *SG Ground Sense — {session}*")
+    lines.append(f"🇸🇬 *SG News — {session}*")
     lines.append(f"_{date_str}_")
     lines.append("")
 
@@ -74,7 +75,7 @@ def format_digest(ranked_posts):
         lines.append("")
 
     lines.append("─────────────────────")
-    lines.append(f"_SG Ground Sense Bot_")
+    lines.append(f"_SG News Bot_")
 
     return "\n".join(lines)
 
