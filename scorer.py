@@ -40,6 +40,9 @@ SOURCE_GROUP_MAX_FRACTION = 0.6   # e.g. CNA alone can't take more than 60% of s
 # Guaranteed Reddit slots — always include this many top Reddit posts if available
 REDDIT_GUARANTEED_SLOTS = 3
 
+# Guaranteed Mothership slots — always include this many top Mothership posts if available
+MOTHERSHIP_GUARANTEED_SLOTS = 1
+
 
 def _source_group(source):
     """Normalise a source into a broad group for diversity capping."""
@@ -178,26 +181,31 @@ def rank_posts(posts):
 
     result = result[:TOP_N]
 
-    # Guarantee Reddit slots: inject top Reddit posts if not already present
-    reddit_in_result = [p for p in result if _source_group(p.get("source", "")) == "reddit"]
-    if len(reddit_in_result) < REDDIT_GUARANTEED_SLOTS:
-        # Find top Reddit posts not already in result
-        reddit_pool = sorted(
-            [p for p in filtered if _source_group(p.get("source", "")) == "reddit"
-             and p not in result],
+    def _inject_guaranteed(result, filtered, group, slots):
+        """Inject guaranteed posts from a source group if not already present."""
+        already_in = [p for p in result if _source_group(p.get("source", "")) == group]
+        if len(already_in) >= slots:
+            return result
+        pool = sorted(
+            [p for p in filtered if _source_group(p.get("source", "")) == group and p not in result],
             key=lambda x: x.get("computed_score", 0), reverse=True
         )
-        slots_needed = REDDIT_GUARANTEED_SLOTS - len(reddit_in_result)
-        reddit_to_add = reddit_pool[:slots_needed]
-        if reddit_to_add:
-            # Drop the lowest-scoring non-Reddit posts to make room
-            non_reddit = [p for p in result if _source_group(p.get("source", "")) != "reddit"]
-            non_reddit_sorted = sorted(non_reddit, key=lambda x: x.get("computed_score", 0))
-            result = [p for p in result if p not in non_reddit_sorted[:len(reddit_to_add)]]
-            result = result + reddit_to_add
-            # Re-sort by score
-            result = sorted(result, key=lambda x: x.get("computed_score", 0), reverse=True)
-            result = result[:TOP_N]
+        to_add = pool[:slots - len(already_in)]
+        if not to_add:
+            return result
+        # Drop lowest-scoring posts from other groups to make room
+        others = [p for p in result if _source_group(p.get("source", "")) != group]
+        others_sorted = sorted(others, key=lambda x: x.get("computed_score", 0))
+        result = [p for p in result if p not in others_sorted[:len(to_add)]]
+        result = result + to_add
+        result = sorted(result, key=lambda x: x.get("computed_score", 0), reverse=True)
+        return result[:TOP_N]
+
+    # Guarantee Reddit slots
+    result = _inject_guaranteed(result, filtered, "reddit", REDDIT_GUARANTEED_SLOTS)
+
+    # Guarantee Mothership slot
+    result = _inject_guaranteed(result, filtered, "mothership", MOTHERSHIP_GUARANTEED_SLOTS)
 
     # Log source breakdown
     breakdown = {}
