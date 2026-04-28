@@ -27,7 +27,6 @@ TELEGRAM_CHANNELS = [
     "@todayonlinesg",
     "@mothershipsg",
     "@TheStraitsTimes",
-    "@Govsg",
 ]
 
 # Number of top posts to include in digest

@@ -7,9 +7,8 @@ Variety matrix (15 slots total):
   Mothership   2  — lighter Gen Z-friendly SG news
   Reddit SG    2  — r/singapore ground sentiment
   Reddit Raw   1  — r/SingaporeRaw unfiltered opinions
-  Gov.sg       1  — official policy/announcements
-  Today        1  — alternative news voice
-  Free         3  — best remaining posts by score from any source
+  Reddit Ask   1  — r/askSingapore questions & advice
+  Free         4  — best remaining posts by score from any source
   HWZ          0  — only if genuinely trending (high threshold)
 """
 import time
@@ -40,7 +39,7 @@ HWZ_MIN_REPLIES = 30
 REDDIT_SCORE_MULTIPLIER = 2.5
 
 # Variety matrix: guaranteed minimum slots per source group
-# Total guaranteed = 12, free slots = 3, total = 15
+# Total guaranteed = 11, free slots = 4, total = 15
 VARIETY_MATRIX = {
     "cna":        3,   # Core hard news
     "st":         2,   # Premium editorial
@@ -48,11 +47,9 @@ VARIETY_MATRIX = {
     "reddit_sg":  2,   # r/singapore — ground sentiment
     "reddit_raw": 1,   # r/SingaporeRaw — unfiltered
     "reddit_ask": 1,   # r/askSingapore — questions & advice
-    "govsg":      1,   # Official policy
-    # today gets 0 guaranteed but can win free slots
-    # 3 free slots filled by best remaining score
+    # 4 free slots filled by best remaining score (today/hwz can win here)
 }
-FREE_SLOTS = 3   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 12 = 3
+FREE_SLOTS = 4   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 11 = 4
 
 
 def _source_group(source):
@@ -105,7 +102,7 @@ def compute_score(post):
         score *= REDDIT_SCORE_MULTIPLIER
 
     # Telegram/RSS channels: floor score so they aren't buried
-    if group in ("cna", "st", "today", "govsg", "mothership"):
+    if group in ("cna", "st", "today", "mothership"):
         score = max(score, boost * 10)
 
     return round(score, 2)
