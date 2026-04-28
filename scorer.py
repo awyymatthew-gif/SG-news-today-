@@ -1,11 +1,16 @@
 """
-Scoring and ranking engine for Singapore Ground Sense News Bot.
+Scoring and ranking engine for SG News Bot.
 
-Source strategy:
-- Reddit SG: boosted score so good posts naturally surface
-- HWZ: only included if it crosses a high trending threshold (views/replies)
-- Telegram channels: fill remaining slots based on raw score
-- No forced slots — if Reddit has nothing worthy, Telegram fills the digest
+Variety matrix (15 slots total):
+  CNA          3  — core hard news
+  ST           2  — premium editorial
+  Mothership   2  — lighter Gen Z-friendly SG news
+  Reddit SG    2  — r/singapore ground sentiment
+  Reddit Raw   1  — r/SingaporeRaw unfiltered opinions
+  Gov.sg       1  — official policy/announcements
+  Today        1  — alternative news voice
+  Free         3  — best remaining posts by score from any source
+  HWZ          0  — only if genuinely trending (high threshold)
 """
 import time
 import logging
@@ -28,40 +33,48 @@ SG_BOOST_KEYWORDS = [
 ]
 
 # HWZ minimum thresholds to be considered "trending"
-HWZ_MIN_VIEWS    = 5000   # thread views
-HWZ_MIN_REPLIES  = 30     # thread replies
+HWZ_MIN_VIEWS   = 5000
+HWZ_MIN_REPLIES = 30
 
-# Reddit scoring multiplier — boosts good Reddit posts to compete with Telegram
+# Reddit scoring multiplier
 REDDIT_SCORE_MULTIPLIER = 2.5
 
-# Soft cap: no single source group dominates more than this fraction of the digest
-SOURCE_GROUP_MAX_FRACTION = 0.6   # e.g. CNA alone can't take more than 60% of slots
-
-# Guaranteed Reddit slots — always include this many top Reddit posts if available
-REDDIT_GUARANTEED_SLOTS = 3
-
-# Guaranteed Mothership slots — always include this many top Mothership posts if available
-MOTHERSHIP_GUARANTEED_SLOTS = 1
+# Variety matrix: guaranteed minimum slots per source group
+# Total guaranteed = 12, free slots = 3, total = 15
+VARIETY_MATRIX = {
+    "cna":        3,   # Core hard news
+    "st":         2,   # Premium editorial
+    "mothership": 2,   # Gen Z-friendly SG news
+    "reddit_sg":  2,   # r/singapore — ground sentiment
+    "reddit_raw": 1,   # r/SingaporeRaw — unfiltered
+    "reddit_ask": 1,   # r/askSingapore — questions & advice
+    "govsg":      1,   # Official policy
+    # today gets 0 guaranteed but can win free slots
+    # 3 free slots filled by best remaining score
+}
+FREE_SLOTS = 3   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 12 = 3
 
 
 def _source_group(source):
-    """Normalise a source into a broad group for diversity capping."""
+    """Normalise a source string into a broad group key."""
     s = source.lower()
-    if any(x in s for x in ["reddit", "r/singapore", "r/singaporeraw", "r/asksingapore"]):
-        return "reddit"
+    if "r/singaporeraw" in s:
+        return "reddit_raw"
+    if "r/asksingapore" in s:
+        return "reddit_ask"
+    if any(x in s for x in ["r/singapore", "reddit"]):
+        return "reddit_sg"
     if any(x in s for x in ["hwz", "hardwarezone"]):
         return "hwz"
-    if "cnalatest" in s or "cna" in s:
+    if "cnalatest" in s or s == "cna":
         return "cna"
-    if "straitstimes" in s or "st" in s:
+    if "straitstimes" in s or s == "st":
         return "st"
-    if "todayonline" in s:
+    if "todayonline" in s or s == "today":
         return "today"
     if "govsg" in s or "gov.sg" in s:
         return "govsg"
     if "mothership" in s:
-        return "mothership"
-    if s == "mothership":
         return "mothership"
     return "other"
 
@@ -74,7 +87,6 @@ def compute_score(post):
     raw_score = post.get("score", 0)
     comments  = post.get("comments", 0)
 
-    # Base engagement score
     score = (
         raw_score * SCORE_WEIGHTS["upvotes"]
         + comments * SCORE_WEIGHTS["comments"]
@@ -86,14 +98,13 @@ def compute_score(post):
     boost = sum(1 for kw in SG_BOOST_KEYWORDS if kw in combined_text)
     score += boost * 5
 
-    source = post.get("source", "")
-    group  = _source_group(source)
+    group = _source_group(post.get("source", ""))
 
-    # Reddit boost — good Reddit posts should naturally surface
-    if group == "reddit":
+    # Reddit boost
+    if group in ("reddit_sg", "reddit_raw"):
         score *= REDDIT_SCORE_MULTIPLIER
 
-    # Telegram channels: ensure they aren't buried when engagement signals are low
+    # Telegram/RSS channels: floor score so they aren't buried
     if group in ("cna", "st", "today", "govsg", "mothership"):
         score = max(score, boost * 10)
 
@@ -102,7 +113,7 @@ def compute_score(post):
 
 def _is_hwz_trending(post):
     """Return True only if an HWZ post crosses the trending threshold."""
-    views   = post.get("score", 0)    # HWZ uses 'score' field for view count
+    views   = post.get("score", 0)
     replies = post.get("comments", 0)
     return views >= HWZ_MIN_VIEWS or replies >= HWZ_MIN_REPLIES
 
@@ -130,7 +141,7 @@ def deduplicate(posts):
 
 
 def rank_posts(posts):
-    """Score, filter, deduplicate, and rank posts. Return top N."""
+    """Score, filter, deduplicate, and rank posts using the variety matrix."""
     if not posts:
         logger.warning("No posts to rank.")
         return []
@@ -160,52 +171,37 @@ def rank_posts(posts):
     # Sort by score descending
     ranked = sorted(filtered, key=lambda x: x["computed_score"], reverse=True)
 
-    # Soft diversity cap: no single source group takes more than SOURCE_GROUP_MAX_FRACTION
-    max_per_group = max(1, int(TOP_N * SOURCE_GROUP_MAX_FRACTION))
-    group_counts  = {}
-    diverse = []
-    overflow = []
-
+    # --- Variety matrix selection ---
+    # Build per-group pools (sorted by score)
+    pools = {}
     for post in ranked:
         g = _source_group(post.get("source", ""))
-        if group_counts.get(g, 0) < max_per_group:
-            diverse.append(post)
-            group_counts[g] = group_counts.get(g, 0) + 1
-        else:
-            overflow.append(post)
+        pools.setdefault(g, []).append(post)
 
-    # Fill remaining slots with overflow posts (best scores first)
-    result = diverse
-    if len(result) < TOP_N:
-        result += overflow[: TOP_N - len(result)]
+    result = []
 
+    # Fill guaranteed slots from each group
+    for group, slots in VARIETY_MATRIX.items():
+        pool = pools.get(group, [])
+        taken = pool[:slots]
+        result.extend(taken)
+
+    # Fill free slots with best remaining posts not already selected
+    selected_ids = {id(p) for p in result}
+    remaining = [p for p in ranked if id(p) not in selected_ids]
+    result.extend(remaining[:FREE_SLOTS])
+
+    # If any group had fewer posts than guaranteed, fill with best remaining
+    while len(result) < TOP_N:
+        selected_ids = {id(p) for p in result}
+        remaining = [p for p in ranked if id(p) not in selected_ids]
+        if not remaining:
+            break
+        result.append(remaining[0])
+
+    # Final sort by score for clean presentation
+    result = sorted(result, key=lambda x: x.get("computed_score", 0), reverse=True)
     result = result[:TOP_N]
-
-    def _inject_guaranteed(result, filtered, group, slots):
-        """Inject guaranteed posts from a source group if not already present."""
-        already_in = [p for p in result if _source_group(p.get("source", "")) == group]
-        if len(already_in) >= slots:
-            return result
-        pool = sorted(
-            [p for p in filtered if _source_group(p.get("source", "")) == group and p not in result],
-            key=lambda x: x.get("computed_score", 0), reverse=True
-        )
-        to_add = pool[:slots - len(already_in)]
-        if not to_add:
-            return result
-        # Drop lowest-scoring posts from other groups to make room
-        others = [p for p in result if _source_group(p.get("source", "")) != group]
-        others_sorted = sorted(others, key=lambda x: x.get("computed_score", 0))
-        result = [p for p in result if p not in others_sorted[:len(to_add)]]
-        result = result + to_add
-        result = sorted(result, key=lambda x: x.get("computed_score", 0), reverse=True)
-        return result[:TOP_N]
-
-    # Guarantee Reddit slots
-    result = _inject_guaranteed(result, filtered, "reddit", REDDIT_GUARANTEED_SLOTS)
-
-    # Guarantee Mothership slot
-    result = _inject_guaranteed(result, filtered, "mothership", MOTHERSHIP_GUARANTEED_SLOTS)
 
     # Log source breakdown
     breakdown = {}
