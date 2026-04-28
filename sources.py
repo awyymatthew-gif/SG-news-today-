@@ -221,7 +221,8 @@ def fetch_telegram_channels():
 
 
 def fetch_mothership():
-    """Fetch latest articles from Mothership.sg via RSS feed."""
+    """Fetch latest articles from Mothership.sg via RSS feed (lenient parser)."""
+    import email.utils
     posts = []
     cutoff = get_cutoff_time()
     try:
@@ -229,21 +230,26 @@ def fetch_mothership():
         headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
         resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        root = ET.fromstring(resp.content)
-        items = root.findall(".//item")
+        # Use BeautifulSoup with lxml-xml for lenient RSS parsing
+        soup = BeautifulSoup(resp.content, "lxml-xml")
+        items = soup.find_all("item")
         count = 0
         for item in items[:20]:
-            title = (item.findtext("title") or "").strip()
-            link  = (item.findtext("link")  or "").strip()
-            pub_date = item.findtext("pubDate") or ""
+            title_tag = item.find("title")
+            link_tag  = item.find("link")
+            pub_tag   = item.find("pubDate")
+            title = title_tag.get_text(strip=True) if title_tag else ""
+            link  = link_tag.get_text(strip=True)  if link_tag  else ""
+            pub_date = pub_tag.get_text(strip=True) if pub_tag else ""
             created_utc = time.time()
             if pub_date:
                 try:
-                    import email.utils
                     created_utc = email.utils.parsedate_to_datetime(pub_date).timestamp()
                 except Exception:
                     pass
             if created_utc < cutoff:
+                continue
+            if not title:
                 continue
             posts.append({
                 "source": "Mothership",
