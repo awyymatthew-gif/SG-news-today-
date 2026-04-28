@@ -172,9 +172,9 @@ def trigger_digest():
 # ── User stats command ────────────────────────────────────────────────────────
 
 def handle_users_command(chat_id):
-    """Send user stats to admin only."""
+    """Send user stats to admin only. Non-admins get no response."""
     if int(chat_id) != ADMIN_CHAT_ID:
-        send_reply(chat_id, "⛔ This command is only available to the bot admin.")
+        # Silently ignore — don't reveal the command exists
         return
 
     users = load_users()
@@ -239,28 +239,33 @@ def run_listener():
 
                 cmd = text.lower().split("@")[0]  # strip @botname suffix
 
-                if cmd == "/digest":
+                if cmd in ["/stats", "/users"]:
+                    handle_users_command(chat_id)
+
+                elif cmd == "/digest":
                     logger.info(f"Digest command received from {username}")
                     send_reply(chat_id, "⏳ Generating digest, please wait...")
                     trigger_digest()
 
                 elif cmd in ["/start", "/help"]:
+                    first_name = message.get("from", {}).get("first_name", "there")
                     send_reply(
                         chat_id,
-                        "🇸🇬 *SG Ground Sense Bot*\n\n"
-                        "I send you the top Singapore news and ground-sense posts daily.\n\n"
-                        "*Auto-digest schedule (SGT):*\n"
-                        "🕗 8:00 AM — Morning briefing\n"
-                        "🕛 12:00 PM — Midday update\n"
-                        "🕘 9:00 PM — Evening wrap-up\n\n"
+                        f"Hey {first_name}! 👋\n\n"
+                        "Welcome to *SG Ground Sense Bot* 🇸🇬\n\n"
+                        "Every day I scan Reddit Singapore, HardwareZone EDMW, CNA, The Straits Times, Today Online and GovSG — then rank and send you the top 15 posts that people are actually talking about.\n\n"
+                        "*You'll get 3 automatic digests daily (Singapore Time):*\n"
+                        "🕗 8:00 AM — Start your morning informed\n"
+                        "🕛 12:00 PM — Midday catch-up\n"
+                        "🕘 9:00 PM — Evening wrap-up before you sleep\n\n"
+                        "No fluff. No algorithm. Just what Singapore is actually talking about.\n\n"
                         "*Commands:*\n"
-                        "/digest — Get the latest digest now\n"
-                        "/help — Show this message",
+                        "/digest — Get the latest digest right now\n"
+                        "/help — Show this message again",
                         parse_mode="Markdown",
                     )
 
-                elif cmd == "/users":
-                    handle_users_command(chat_id)
+
 
         except KeyboardInterrupt:
             logger.info("Listener stopped by user.")
