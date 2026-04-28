@@ -37,11 +37,14 @@ TOP_N = 15
 SCORE_WEIGHTS = {
     "upvotes": 1.0,
     "comments": 2.0,
-    "recency_hours": -0.5,  # penalty per hour old
+    "recency_hours": -3.0,  # strong penalty per hour old — fresh news wins
 }
 
 # Hours lookback for posts
-LOOKBACK_HOURS = 12
+# Each digest covers the window since the previous digest:
+# Morning (8AM): last 11h  |  Midday (12PM): last 4h  |  Evening (9PM): last 9h
+# Use 6h as a balanced default — keeps content fresh and same-day
+LOOKBACK_HOURS = 6
 
 # Log file paths
 BOT_LOG = "/home/ubuntu/sg_news_bot/bot.log"
