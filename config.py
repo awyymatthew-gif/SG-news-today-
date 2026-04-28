@@ -46,6 +46,8 @@ SCORE_WEIGHTS = {
 # Use 6h as a balanced default — keeps content fresh and same-day
 LOOKBACK_HOURS = 6
 
-# Log file paths
-BOT_LOG = "/home/ubuntu/sg_news_bot/bot.log"
-LISTENER_LOG = "/home/ubuntu/sg_news_bot/listener.log"
+# Log file paths — use relative paths so they work both locally and on Render
+import os as _os
+_BASE = _os.path.dirname(_os.path.abspath(__file__))
+BOT_LOG = _os.path.join(_BASE, "bot.log")
+LISTENER_LOG = _os.path.join(_BASE, "listener.log")

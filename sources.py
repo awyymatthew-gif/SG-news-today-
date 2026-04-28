@@ -5,6 +5,7 @@ Fetches from Reddit SG subreddits, HardwareZone EDMW, and Telegram channels.
 import logging
 import time
 import datetime
+import re
 import xml.etree.ElementTree as ET
 import requests
 import urllib3
@@ -16,6 +17,23 @@ from config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── Ad / promotional content filter ──────────────────────────────────────────
+# Any post whose title matches these patterns is silently dropped.
+_AD_PATTERNS = re.compile(
+    r"^\[ad\]"                    # starts with [Ad]
+    r"|^\[sponsored\]"            # starts with [Sponsored]
+    r"|^\[promo\]"                # starts with [Promo]
+    r"|^\[advertisement\]"        # starts with [Advertisement]
+    r"|\bsponsored\s+content\b"   # "sponsored content" anywhere
+    r"|\badvertisement\b"         # "advertisement" anywhere
+    r"|\bpromotional\b",          # "promotional" anywhere
+    re.IGNORECASE,
+)
+
+def is_ad(title: str) -> bool:
+    """Return True if the title looks like an ad/sponsored post."""
+    return bool(_AD_PATTERNS.search(title.strip()))
 
 
 def get_cutoff_time():
@@ -66,6 +84,10 @@ def fetch_reddit_posts():
                 if created_utc < cutoff:
                     continue
 
+                if is_ad(title):
+                    logger.debug(f"Filtered ad from r/{subreddit}: {title[:60]}")
+                    continue
+
                 posts.append({
                     "source": f"r/{subreddit}",
                     "title": title,
@@ -112,6 +134,10 @@ def fetch_hwz_edmw():
                 href = title_el.get("href", "")
                 if href and not href.startswith("http"):
                     href = "https://forums.hardwarezone.com.sg" + href
+
+                if is_ad(title):
+                    logger.debug(f"Filtered ad from HWZ: {title[:60]}")
+                    continue
 
                 # Get reply count
                 replies_el = thread.select_one("dd.pairs--justified") or thread.select_one(".discussionListItem-stats .count")
@@ -209,6 +235,11 @@ def fetch_telegram_channels():
                     if len(headline) > 300:
                         headline = headline[:297].rsplit(" ", 1)[0] + "…"
 
+                    # Filter ads from Telegram channels (e.g. Mothership [Ad] posts)
+                    if is_ad(headline) or is_ad(text[:100]):
+                        logger.debug(f"Filtered ad from {channel}: {headline[:60]}")
+                        continue
+
                     posts.append({
                         "source": f"Telegram {channel}",
                         "title": headline,
@@ -260,6 +291,10 @@ def fetch_mothership():
             if created_utc < cutoff:
                 continue
             if not title:
+                continue
+            # Filter ads from Mothership RSS
+            if is_ad(title):
+                logger.debug(f"Filtered Mothership ad: {title[:60]}")
                 continue
             posts.append({
                 "source": "Mothership",
