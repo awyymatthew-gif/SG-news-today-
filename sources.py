@@ -199,9 +199,19 @@ def fetch_telegram_channels():
                         except Exception:
                             pass
 
+                    # Use full text as title — no truncation
+                    # For Telegram posts, take first sentence or first 300 chars as headline
+                    headline = text
+                    # If text has a newline, use only the first line as headline
+                    if "\n" in text:
+                        headline = text.split("\n")[0].strip()
+                    # Cap at 300 chars at a word boundary if still too long
+                    if len(headline) > 300:
+                        headline = headline[:297].rsplit(" ", 1)[0] + "…"
+
                     posts.append({
                         "source": f"Telegram {channel}",
-                        "title": text[:120],
+                        "title": headline,
                         "url": msg_url,
                         "score": views,
                         "comments": 0,

@@ -25,8 +25,8 @@ HWZ_EDMW_URL = "https://forums.hardwarezone.com.sg/forums/eat-drink-man-woman.16
 TELEGRAM_CHANNELS = [
     "@cnalatest",
     "@todayonlinesg",
-    "@mothership_sg",
-    "@straitstimes",
+    "@mothershipsg",
+    "@TheStraitsTimes",
     "@Govsg",
 ]
 
