@@ -11,6 +11,9 @@ import os
 import requests
 from config import TELEGRAM_BOT_TOKEN
 import db
+from sources import fetch_all_sources
+from scorer import rank_posts
+from digest import format_digest, format_digest_plain
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -69,9 +72,6 @@ def send_message(chat_id, text, parse_mode=None):
 def trigger_digest(reply_chat_id):
     """Run the full digest pipeline and send result to reply_chat_id."""
     try:
-        from sources import fetch_all_sources
-        from scorer import rank_posts
-        from digest import format_digest, format_digest_plain
         from config import TELEGRAM_CHAT_ID
 
         db.init_db()

@@ -105,7 +105,7 @@ def compute_score(post):
     if group in ("cna", "st", "today", "mothership"):
         score = max(score, boost * 10)
 
-    return round(score, 2)
+    return round(float(score), 2)
 
 
 def _is_hwz_trending(post):
@@ -176,25 +176,66 @@ def rank_posts(posts):
         pools.setdefault(g, []).append(post)
 
     result = []
+    group_counts = {}  # tracks how many slots each group has taken
 
-    # Fill guaranteed slots from each group
+    # Step 1: Fill guaranteed slots from each group (hard cap = guaranteed)
     for group, slots in VARIETY_MATRIX.items():
         pool = pools.get(group, [])
         taken = pool[:slots]
         result.extend(taken)
+        group_counts[group] = len(taken)
 
-    # Fill free slots with best remaining posts not already selected
+    # Step 2: Fill FREE_SLOTS with best remaining posts
+    # First pass: each group wins at most 1 free slot (ensures variety)
     selected_ids = {id(p) for p in result}
     remaining = [p for p in ranked if id(p) not in selected_ids]
-    result.extend(remaining[:FREE_SLOTS])
+    free_added = 0
+    free_group_counts = {}  # extra slots won per group in free slot pass
+    for p in remaining:
+        if free_added >= FREE_SLOTS:
+            break
+        g = _source_group(p.get("source", ""))
+        if free_group_counts.get(g, 0) < 1:
+            result.append(p)
+            group_counts[g] = group_counts.get(g, 0) + 1
+            free_group_counts[g] = free_group_counts.get(g, 0) + 1
+            free_added += 1
+    # Second pass: fill any remaining free slots with hard cap per group
+    if free_added < FREE_SLOTS:
+        selected_ids = {id(p) for p in result}
+        remaining = [p for p in ranked if id(p) not in selected_ids]
+        for p in remaining:
+            if free_added >= FREE_SLOTS:
+                break
+            g = _source_group(p.get("source", ""))
+            hard_cap = VARIETY_MATRIX.get(g, 0) + FREE_SLOTS
+            if group_counts.get(g, 0) < hard_cap:
+                result.append(p)
+                group_counts[g] = group_counts.get(g, 0) + 1
+                free_added += 1
 
-    # If any group had fewer posts than guaranteed, fill with best remaining
+    # Step 3: If result still short (some groups had 0 posts), fill with best remaining
+    # Hard cap enforced: no group may exceed guaranteed + FREE_SLOTS
     while len(result) < TOP_N:
         selected_ids = {id(p) for p in result}
         remaining = [p for p in ranked if id(p) not in selected_ids]
         if not remaining:
             break
-        result.append(remaining[0])
+        added = False
+        for p in remaining:
+            g = _source_group(p.get("source", ""))
+            hard_cap = VARIETY_MATRIX.get(g, 0) + FREE_SLOTS
+            if group_counts.get(g, 0) < hard_cap:
+                result.append(p)
+                group_counts[g] = group_counts.get(g, 0) + 1
+                added = True
+                break
+        if not added:
+            # Truly no posts within cap — must overflow to avoid empty digest
+            result.append(remaining[0])
+            g = _source_group(remaining[0].get("source", ""))
+            group_counts[g] = group_counts.get(g, 0) + 1
+            break
 
     # Final sort by score for clean presentation
     result = sorted(result, key=lambda x: x.get("computed_score", 0), reverse=True)

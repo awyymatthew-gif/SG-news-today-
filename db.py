@@ -64,6 +64,12 @@ def init_db():
                 key     TEXT PRIMARY KEY,
                 value   TEXT NOT NULL
             );
+
+            -- bot_state is an alias for listener_state (backward compat)
+            CREATE TABLE IF NOT EXISTS bot_state (
+                key     TEXT PRIMARY KEY,
+                value   TEXT NOT NULL
+            );
         """)
     logger.info("DB initialised.")
 

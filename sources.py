@@ -24,6 +24,8 @@ _AD_PATTERNS = re.compile(
     r"^\[ad\]"                    # starts with [Ad]
     r"|^\[sponsored\]"            # starts with [Sponsored]
     r"|^\[promo\]"                # starts with [Promo]
+    r"|^\[promoted\]"             # starts with [Promoted]
+    r"|^\[paid\]"                 # starts with [Paid]
     r"|^\[advertisement\]"        # starts with [Advertisement]
     r"|\bsponsored\s+content\b"   # "sponsored content" anywhere
     r"|\badvertisement\b"         # "advertisement" anywhere
@@ -33,7 +35,9 @@ _AD_PATTERNS = re.compile(
 
 def is_ad(title: str) -> bool:
     """Return True if the title looks like an ad/sponsored post."""
-    return bool(_AD_PATTERNS.search(title.strip()))
+    if not title:
+        return False
+    return bool(_AD_PATTERNS.search(str(title).strip()))
 
 
 def get_cutoff_time():
@@ -309,6 +313,80 @@ def fetch_mothership():
         logger.info(f"Fetched {count} articles from Mothership RSS")
     except Exception as e:
         logger.error(f"Error fetching Mothership RSS: {e}")
+    return posts
+
+
+# ── Aliases for backward-compat and testing ──────────────────────────────────
+def fetch_reddit(subreddit: str) -> list:
+    """Fetch posts from a single subreddit (alias used in tests)."""
+    import xml.etree.ElementTree as ET
+    posts = []
+    cutoff = get_cutoff_time()
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+    try:
+        url = f"https://www.reddit.com/r/{subreddit}/hot.rss?limit=50"
+        resp = requests.get(url, headers=headers, timeout=15, verify=False)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        for entry in root.findall("atom:entry", ns):
+            title_el = entry.find("atom:title", ns)
+            link_el  = entry.find("atom:link", ns)
+            title = title_el.text if title_el is not None else ""
+            link  = link_el.get("href", "") if link_el is not None else ""
+            if is_ad(title):
+                continue
+            posts.append({"source": f"r/{subreddit}", "title": title, "url": link,
+                          "score": 0, "comments": 0, "created_utc": time.time(), "text": ""})
+    except Exception as e:
+        logger.error(f"fetch_reddit({subreddit}): {e}")
+    return posts
+
+
+def fetch_telegram_channel(channel: str) -> list:
+    """Fetch posts from a single Telegram channel (alias used in tests)."""
+    channel_name = channel.lstrip("@")
+    posts = []
+    try:
+        url = f"https://t.me/s/{channel_name}"
+        headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for msg in soup.select(".tgme_widget_message_wrap")[-20:]:
+            text_el = msg.select_one(".tgme_widget_message_text")
+            if not text_el:
+                continue
+            text = text_el.get_text(separator=" ", strip=True)[:500]
+            if is_ad(text):
+                continue
+            posts.append({"source": f"Telegram {channel}", "title": text[:200],
+                          "url": "", "score": 0, "comments": 0,
+                          "created_utc": time.time(), "text": text})
+    except Exception as e:
+        logger.error(f"fetch_telegram_channel({channel}): {e}")
+    return posts
+
+
+def fetch_rss(url: str) -> list:
+    """Fetch posts from an RSS/Atom feed URL (alias used in tests)."""
+    posts = []
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.content, "lxml-xml")
+        for item in soup.find_all("item")[:20]:
+            title_tag = item.find("title")
+            link_tag  = item.find("link")
+            title = title_tag.get_text(strip=True) if title_tag else ""
+            link  = link_tag.get_text(strip=True)  if link_tag  else ""
+            if is_ad(title):
+                continue
+            posts.append({"source": "rss", "title": title, "url": link,
+                          "score": 0, "comments": 0, "created_utc": time.time(), "text": ""})
+    except Exception as e:
+        logger.error(f"fetch_rss({url}): {e}")
     return posts
 
 
