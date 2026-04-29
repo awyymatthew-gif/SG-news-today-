@@ -16,7 +16,7 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
 
-  # Cron job — Morning digest at 8:00 AM SGT (00:00 UTC)
+    # Cron job — Morning digest at 8:00 AM SGT (00:00 UTC)
   - type: cron
     name: sg-news-digest-morning
     runtime: python
@@ -26,12 +26,11 @@ services:
     startCommand: python bot.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false
+        sync: false   # Set manually in Render dashboard
       - key: TELEGRAM_CHAT_ID
-        sync: false
+        value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
-
   # Cron job — Midday digest at 12:00 PM SGT (04:00 UTC)
   - type: cron
     name: sg-news-digest-midday
@@ -42,12 +41,11 @@ services:
     startCommand: python bot.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false
+        sync: false   # Set manually in Render dashboard
       - key: TELEGRAM_CHAT_ID
-        sync: false
+        value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
-
   # Cron job — Evening digest at 9:00 PM SGT (13:00 UTC)
   - type: cron
     name: sg-news-digest-evening
@@ -58,8 +56,8 @@ services:
     startCommand: python bot.py
     envVars:
       - key: TELEGRAM_BOT_TOKEN
-        sync: false
+        sync: false   # Set manually in Render dashboard
       - key: TELEGRAM_CHAT_ID
-        sync: false
+        value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
