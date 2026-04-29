@@ -20,12 +20,12 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
 
-    # Cron job — Morning digest at 8:00 AM SGT (00:00 UTC)
+    # Cron job — Morning digest at 7:30 AM SGT (23:30 UTC previous day)
   - type: cron
     name: sg-news-digest-morning
     runtime: python
     plan: starter
-    schedule: "0 0 * * *"
+    schedule: "30 23 * * *"
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
