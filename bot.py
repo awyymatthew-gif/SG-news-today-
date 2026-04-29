@@ -1,6 +1,7 @@
 """
 Singapore Ground Sense News Bot - Main Digest Runner
 Fetches from all sources, scores/ranks posts, generates and sends digest to Telegram.
+Uses SQLite (db.py) on Render's persistent disk to prevent duplicate posts across runs.
 """
 import logging
 import sys
@@ -10,6 +11,7 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BOT_LOG
 from sources import fetch_all_sources
 from scorer import rank_posts
 from digest import format_digest, format_digest_plain
+import db
 
 # Configure logging
 logging.basicConfig(
@@ -94,7 +96,6 @@ def split_and_send(text, max_length=4096):
     if len(text) <= max_length:
         return send_telegram_message(text)
 
-    # Split by double newline (paragraph breaks)
     parts = []
     current = ""
     for line in text.split("\n"):
@@ -113,11 +114,31 @@ def split_and_send(text, max_length=4096):
     return success
 
 
+def split_and_send_plain(text, max_length=4096):
+    """Split and send plain text messages."""
+    parts = []
+    current = ""
+    for line in text.split("\n"):
+        if len(current) + len(line) + 1 > max_length:
+            parts.append(current)
+            current = line
+        else:
+            current += "\n" + line if current else line
+    if current:
+        parts.append(current)
+
+    for part in parts:
+        send_telegram_message_plain(part)
+
+
 def run_digest():
     """Main digest pipeline: fetch, score, rank, format, send."""
     logger.info("=" * 50)
     logger.info("Starting Singapore Ground Sense digest run")
     logger.info("=" * 50)
+
+    # Initialise DB (creates tables if not present)
+    db.init_db()
 
     # Step 1: Fetch from all sources
     logger.info("Step 1: Fetching from all sources...")
@@ -125,11 +146,23 @@ def run_digest():
 
     if not all_posts:
         logger.warning("No posts fetched from any source.")
-        msg = "⚠️ SG Ground Sense Bot: No posts could be fetched at this time. Please check source availability."
+        msg = "⚠️ SG Ground Sense Bot: No posts could be fetched at this time."
         send_telegram_message_plain(msg)
         return
 
     logger.info(f"Total posts fetched: {len(all_posts)}")
+
+    # Step 1b: Filter out posts already sent in a previous digest
+    fresh_posts = [p for p in all_posts if not db.is_already_sent(p)]
+    skipped = len(all_posts) - len(fresh_posts)
+    if skipped:
+        logger.info(f"Filtered {skipped} already-sent posts — {len(fresh_posts)} fresh posts remain")
+    all_posts = fresh_posts
+
+    if not all_posts:
+        logger.warning("All fetched posts were already sent. Nothing new to digest.")
+        send_telegram_message_plain("📭 No new stories since the last digest.")
+        return
 
     # Step 2: Score and rank
     logger.info("Step 2: Scoring and ranking posts...")
@@ -146,29 +179,18 @@ def run_digest():
 
     if success:
         logger.info("Digest sent successfully!")
+        # Step 5: Mark sent posts in DB so they won't repeat
+        db.mark_sent(ranked)
+        db.prune_sent_posts(keep_days=3)
     else:
         logger.error("Failed to send digest via MarkdownV2, trying plain text...")
         plain_digest = format_digest_plain(ranked)
         split_and_send_plain(plain_digest)
+        # Still mark as sent even if we fell back to plain text
+        db.mark_sent(ranked)
+        db.prune_sent_posts(keep_days=3)
 
     logger.info("Digest run complete.")
-
-
-def split_and_send_plain(text, max_length=4096):
-    """Split and send plain text messages."""
-    parts = []
-    current = ""
-    for line in text.split("\n"):
-        if len(current) + len(line) + 1 > max_length:
-            parts.append(current)
-            current = line
-        else:
-            current += "\n" + line if current else line
-    if current:
-        parts.append(current)
-
-    for part in parts:
-        send_telegram_message_plain(part)
 
 
 if __name__ == "__main__":
