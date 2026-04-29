@@ -10,7 +10,7 @@ import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BOT_LOG
 from sources import fetch_all_sources
 from scorer import rank_posts
-from digest import format_digest, format_digest_plain
+from digest import format_digest, format_digest_chunks, format_digest_plain
 import db
 
 # Configure logging
@@ -169,26 +169,33 @@ def run_digest():
     ranked = rank_posts(all_posts)
     logger.info(f"Top {len(ranked)} posts selected for digest")
 
-    # Step 3: Format digest
+    # Step 3: Format digest into atomic chunks (each under 3800 chars — never splits mid-URL)
     logger.info("Step 3: Formatting digest...")
-    digest_text = format_digest(ranked)
+    chunks = format_digest_chunks(ranked)
+    logger.info(f"Digest split into {len(chunks)} message(s)")
 
-    # Step 4: Send to Telegram
+    # Step 4: Send each chunk to Telegram
     logger.info("Step 4: Sending digest to Telegram...")
-    success = split_and_send(digest_text)
+    all_ok = True
+    for idx, chunk in enumerate(chunks):
+        logger.info(f"Sending chunk {idx+1}/{len(chunks)} ({len(chunk)} chars)")
+        ok = send_telegram_message(chunk)
+        if not ok:
+            all_ok = False
+            logger.error(f"Chunk {idx+1} failed MarkdownV2, falling back to plain text")
+            # Strip MarkdownV2 escapes for plain text fallback
+            import re
+            plain_chunk = re.sub(r'\\([_*\[\]()~`>#+=|{}.!-])', r'\1', chunk)
+            send_telegram_message_plain(plain_chunk)
 
-    if success:
-        logger.info("Digest sent successfully!")
-        # Step 5: Mark sent posts in DB so they won't repeat
-        db.mark_sent(ranked)
-        db.prune_sent_posts(keep_days=3)
+    if all_ok:
+        logger.info("All digest chunks sent successfully!")
     else:
-        logger.error("Failed to send digest via MarkdownV2, trying plain text...")
-        plain_digest = format_digest_plain(ranked)
-        split_and_send_plain(plain_digest)
-        # Still mark as sent even if we fell back to plain text
-        db.mark_sent(ranked)
-        db.prune_sent_posts(keep_days=3)
+        logger.warning("Some chunks fell back to plain text.")
+
+    # Step 5: Mark sent posts in DB so they won't repeat
+    db.mark_sent(ranked)
+    db.prune_sent_posts(keep_days=3)
 
     logger.info("Digest run complete.")
 
