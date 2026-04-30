@@ -82,10 +82,17 @@ def _post_hash(post: dict) -> str:
 
 
 def is_already_sent(post: dict) -> bool:
-    """Return True if this post was already sent in a previous digest."""
+    """Return True if this post was already sent within the last 8 hours.
+
+    8 hours prevents the same story repeating in back-to-back digests,
+    while still allowing new stories that appear after a digest to be included.
+    """
     h = _post_hash(post)
     with _conn() as con:
-        row = con.execute("SELECT 1 FROM sent_posts WHERE hash=?", (h,)).fetchone()
+        row = con.execute(
+            "SELECT 1 FROM sent_posts WHERE hash=? AND sent_at > datetime('now', '-8 hours')",
+            (h,)
+        ).fetchone()
     return row is not None
 
 
