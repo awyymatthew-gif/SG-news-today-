@@ -157,12 +157,18 @@ def run_digest():
     skipped = len(all_posts) - len(fresh_posts)
     if skipped:
         logger.info(f"Filtered {skipped} already-sent posts — {len(fresh_posts)} fresh posts remain")
-    all_posts = fresh_posts
 
-    if not all_posts:
-        logger.warning("All fetched posts were already sent. Nothing new to digest.")
-        send_telegram_message_plain("📭 No new stories since the last digest.")
-        return
+    # Fallback: if dedup leaves fewer than 5 stories, ignore dedup entirely
+    # This guarantees every digest always has content — no empty digests.
+    MIN_FRESH = 5
+    if len(fresh_posts) < MIN_FRESH:
+        logger.warning(
+            f"Only {len(fresh_posts)} fresh posts after dedup (threshold={MIN_FRESH}). "
+            f"Ignoring dedup — using all {len(all_posts)} posts to ensure a full digest."
+        )
+        # all_posts stays as-is (full unfiltered list)
+    else:
+        all_posts = fresh_posts
 
     # Step 2: Score and rank
     logger.info("Step 2: Scoring and ranking posts...")
