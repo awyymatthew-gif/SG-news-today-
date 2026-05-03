@@ -612,11 +612,11 @@ class TestBotListener(unittest.TestCase):
         posts = [make_post(title=f"Already sent T85-{i}") for i in range(3)]
         db.mark_sent(posts)
         with patch("bot.fetch_all_sources", return_value=posts), \
+             patch("bot.send_telegram_message") as mock_md, \
              patch("bot.send_telegram_message_plain") as mock_plain:
             bot.run_digest()
-            # Should send "no new stories" message
-            args = " ".join(str(c) for c in mock_plain.call_args_list)
-            self.assertTrue("no new" in args.lower() or "nothing" in args.lower() or mock_plain.called)
+            # Fallback: when all posts already sent, dedup is ignored and digest sent anyway
+            self.assertTrue(mock_md.called or mock_plain.called)
 
     # T86
     def test_bot_run_digest_sends_on_success(self):

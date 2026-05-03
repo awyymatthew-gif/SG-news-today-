@@ -35,6 +35,8 @@ services:
         value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: SKIP_REDDIT
+        value: "true"  # Reddit is blocked on Render servers (SSL/IP block)
   # Cron job — Midday digest at 12:00 PM SGT (04:00 UTC)
   - type: cron
     name: sg-news-digest-midday
@@ -50,6 +52,8 @@ services:
         value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: SKIP_REDDIT
+        value: "true"  # Reddit is blocked on Render servers (SSL/IP block)
   # Cron job — Evening digest at 9:00 PM SGT (13:00 UTC)
   - type: cron
     name: sg-news-digest-evening
@@ -65,3 +69,5 @@ services:
         value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: SKIP_REDDIT
+        value: "true"  # Reddit is blocked on Render servers (SSL/IP block)

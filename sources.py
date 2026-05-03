@@ -47,7 +47,12 @@ def get_cutoff_time():
 
 def fetch_reddit_posts():
     """Fetch hot posts from configured SG subreddits using Reddit RSS feeds."""
+    import os
     import xml.etree.ElementTree as ET
+    # Skip Reddit entirely on cloud servers (Render blocks Reddit via SSL/IP)
+    if os.environ.get("SKIP_REDDIT", "").lower() in ("1", "true", "yes"):
+        logger.info("SKIP_REDDIT=true — skipping Reddit fetch (blocked on cloud servers)")
+        return []
     posts = []
     cutoff = get_cutoff_time()
     headers = {
@@ -57,7 +62,7 @@ def fetch_reddit_posts():
     for subreddit in REDDIT_SUBREDDITS:
         try:
             url = f"https://www.reddit.com/r/{subreddit}/hot.rss?limit=50"
-            resp = requests.get(url, headers=headers, timeout=15, verify=False)
+            resp = requests.get(url, headers=headers, timeout=5, verify=False)
             resp.raise_for_status()
             root = ET.fromstring(resp.text)
             ns = {"atom": "http://www.w3.org/2005/Atom"}
