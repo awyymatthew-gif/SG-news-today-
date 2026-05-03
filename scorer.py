@@ -2,14 +2,14 @@
 Scoring and ranking engine for SG News Bot.
 
 Variety matrix (15 slots total):
-  CNA          3  — core hard news
-  ST           2  — premium editorial
+  CNA          4  — core hard news
+  ST           3  — premium editorial
   Mothership   2  — lighter Gen Z-friendly SG news
-  Reddit SG    2  — r/singapore ground sentiment
-  Reddit Raw   1  — r/SingaporeRaw unfiltered opinions
-  Reddit Ask   1  — r/askSingapore questions & advice
-  Free         4  — best remaining posts by score from any source
+  Today        1  — Today Online
+  Free         5  — best remaining posts by score from any source
   HWZ          0  — only if genuinely trending (high threshold)
+
+Note: Reddit removed — blocked on cloud servers (SSL/IP block).
 """
 import time
 import logging
@@ -39,17 +39,16 @@ HWZ_MIN_REPLIES = 30
 REDDIT_SCORE_MULTIPLIER = 2.5
 
 # Variety matrix: guaranteed minimum slots per source group
-# Total guaranteed = 11, free slots = 4, total = 15
+# Total guaranteed = 10, free slots = 5, total = 15
+# Reddit removed — blocked on cloud servers (SSL/IP block by Reddit CDN)
 VARIETY_MATRIX = {
-    "cna":        3,   # Core hard news
-    "st":         2,   # Premium editorial
+    "cna":        4,   # Core hard news
+    "st":         3,   # Premium editorial
     "mothership": 2,   # Gen Z-friendly SG news
-    "reddit_sg":  2,   # r/singapore — ground sentiment
-    "reddit_raw": 1,   # r/SingaporeRaw — unfiltered
-    "reddit_ask": 1,   # r/askSingapore — questions & advice
-    # 4 free slots filled by best remaining score (today/hwz can win here)
+    "today":      1,   # Today Online
+    # 5 free slots filled by best remaining score (hwz/other can win here)
 }
-FREE_SLOTS = 4   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 11 = 4
+FREE_SLOTS = 5   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 10 = 5
 
 
 def _source_group(source):
