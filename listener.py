@@ -202,7 +202,7 @@ def run_listener():
                         chat_id,
                         "🇸🇬 *SG News*\n"
                         "Top 15 Singapore stories, 3× a day.\n\n"
-                        "🕗 8AM  •  🕛 12PM  •  🕘 9PM\n\n"
+                        "🕖 7:30AM  •  🕛 12PM  •  🕘 9PM\n\n"
                         "Tap /digest to get the latest digest now.",
                         parse_mode="Markdown",
                     )
