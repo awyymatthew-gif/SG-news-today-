@@ -19,13 +19,20 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 # ── Path ──────────────────────────────────────────────────────────────────────
-# Render mounts the persistent disk at /data.
-# Locally we fall back to the project directory.
-_DISK = "/data"
-if os.path.isdir(_DISK) and os.access(_DISK, os.W_OK):
-    DB_PATH = os.path.join(_DISK, "sgnews.db")
-else:
-    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sgnews.db")
+# Priority:
+#   1. SG_NEWS_DB_PATH env var (used by tests for isolation)
+#   2. Render persistent disk at /data
+#   3. Local project directory fallback
+def _resolve_db_path() -> str:
+    env_path = os.environ.get("SG_NEWS_DB_PATH", "")
+    if env_path:
+        return env_path
+    _DISK = "/data"
+    if os.path.isdir(_DISK) and os.access(_DISK, os.W_OK):
+        return os.path.join(_DISK, "sgnews.db")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "sgnews.db")
+
+DB_PATH = _resolve_db_path()
 
 logger.info(f"SQLite DB path: {DB_PATH}")
 

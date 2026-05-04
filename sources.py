@@ -396,28 +396,27 @@ def fetch_rss(url: str) -> list:
 
 
 def fetch_all_sources():
-    """Fetch posts from all configured sources."""
+    """Fetch posts from all configured sources in parallel for speed."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    fetchers = {
+        "Reddit":    fetch_reddit_posts,
+        "HWZ EDMW":  fetch_hwz_edmw,
+        "Telegram":  fetch_telegram_channels,
+        "Mothership": fetch_mothership,
+    }
+
     all_posts = []
-
-    logger.info("Fetching from Reddit SG subreddits...")
-    reddit_posts = fetch_reddit_posts()
-    all_posts.extend(reddit_posts)
-    logger.info(f"Reddit: {len(reddit_posts)} posts")
-
-    logger.info("Fetching from HardwareZone EDMW...")
-    hwz_posts = fetch_hwz_edmw()
-    all_posts.extend(hwz_posts)
-    logger.info(f"HWZ EDMW: {len(hwz_posts)} posts")
-
-    logger.info("Fetching from Telegram channels...")
-    tg_posts = fetch_telegram_channels()
-    all_posts.extend(tg_posts)
-    logger.info(f"Telegram channels: {len(tg_posts)} posts")
-
-    logger.info("Fetching from Mothership RSS...")
-    ms_posts = fetch_mothership()
-    all_posts.extend(ms_posts)
-    logger.info(f"Mothership: {len(ms_posts)} posts")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_name = {executor.submit(fn): name for name, fn in fetchers.items()}
+        for future in as_completed(future_to_name, timeout=45):
+            name = future_to_name[future]
+            try:
+                posts = future.result(timeout=45)
+                all_posts.extend(posts)
+                logger.info(f"{name}: {len(posts)} posts")
+            except Exception as e:
+                logger.error(f"{name} fetch failed: {e}")
 
     logger.info(f"Total posts fetched: {len(all_posts)}")
     return all_posts
