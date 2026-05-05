@@ -13,7 +13,7 @@ from config import TELEGRAM_BOT_TOKEN
 import db
 from sources import fetch_all_sources
 from scorer import rank_posts
-from digest import format_digest, format_digest_plain
+from digest import format_digest_chunks, format_digest_plain
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -87,11 +87,18 @@ def trigger_digest(reply_chat_id):
             send_message(reply_chat_id, "📭 No new stories since the last digest.")
             return
 
-        ranked = rank_posts(fresh)
-        digest_text = format_digest(ranked)
+        # Dedup fallback: if fewer than 5 fresh posts, use all posts
+        MIN_FRESH = 5
+        if len(fresh) < MIN_FRESH:
+            logger.warning(f"Only {len(fresh)} fresh posts — ignoring dedup, using all {len(all_posts)} posts")
+            ranked = rank_posts(all_posts)
+        else:
+            ranked = rank_posts(fresh)
 
-        # Send to the requesting chat
-        chunks = [digest_text[i:i+4096] for i in range(0, len(digest_text), 4096)]
+        # Format into atomic chunks (never splits mid-URL)
+        chunks = format_digest_chunks(ranked)
+
+        # Send each chunk to the requesting chat
         for chunk in chunks:
             payload = {
                 "chat_id": reply_chat_id,
@@ -105,15 +112,13 @@ def trigger_digest(reply_chat_id):
                 if not data.get("ok"):
                     logger.error(f"Digest send error: {data}")
                     # Fallback to plain text
-                    plain = format_digest_plain(ranked)
-                    plain_chunks = [plain[i:i+4096] for i in range(0, len(plain), 4096)]
-                    for pc in plain_chunks:
-                        requests.post(f"{BASE_URL}/sendMessage", json={
-                            "chat_id": reply_chat_id,
-                            "text": pc,
-                            "disable_web_page_preview": True,
-                        }, timeout=30)
-                    break
+                    import re
+                    plain_chunk = re.sub(r'\\([_*\[\]()~`>#+=|{}.!-])', r'\1', chunk)
+                    requests.post(f"{BASE_URL}/sendMessage", json={
+                        "chat_id": reply_chat_id,
+                        "text": plain_chunk,
+                        "disable_web_page_preview": True,
+                    }, timeout=30)
             except Exception as e:
                 logger.error(f"Digest send exception: {e}")
 
