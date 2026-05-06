@@ -1,5 +1,7 @@
 services:
-  # Background worker — runs listener.py 24/7 for on-demand /digest commands
+  # Background worker — runs listener.py 24/7
+  # Handles: Telegram commands (/digest, /start, /help, /users)
+  # AND: scheduled digests at 7:30AM, 12PM, 9PM SGT (built-in scheduler)
   - type: worker
     name: sg-news-bot-listener
     runtime: python
@@ -16,56 +18,6 @@ services:
       - key: TELEGRAM_CHAT_ID
         value: "472397582"
       - key: ADMIN_CHAT_ID
-        sync: false   # Set manually in Render dashboard
-      - key: PYTHONUNBUFFERED
-        value: "1"
-
-    # Cron job — Morning digest at 7:30 AM SGT (23:30 UTC previous day)
-  - type: cron
-    name: sg-news-digest-morning
-    runtime: python
-    plan: starter
-    schedule: "30 23 * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false   # Set manually in Render dashboard
-      - key: TELEGRAM_CHAT_ID
-        value: "472397582"
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: SKIP_REDDIT
-        value: "true"  # Reddit is blocked on Render servers (SSL/IP block)
-  # Cron job — Midday digest at 12:00 PM SGT (04:00 UTC)
-  - type: cron
-    name: sg-news-digest-midday
-    runtime: python
-    plan: starter
-    schedule: "0 4 * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false   # Set manually in Render dashboard
-      - key: TELEGRAM_CHAT_ID
-        value: "472397582"
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: SKIP_REDDIT
-        value: "true"  # Reddit is blocked on Render servers (SSL/IP block)
-  # Cron job — Evening digest at 9:00 PM SGT (13:00 UTC)
-  - type: cron
-    name: sg-news-digest-evening
-    runtime: python
-    plan: starter
-    schedule: "0 13 * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false   # Set manually in Render dashboard
-      - key: TELEGRAM_CHAT_ID
         value: "472397582"
       - key: PYTHONUNBUFFERED
         value: "1"
