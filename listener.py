@@ -160,11 +160,63 @@ def run_digest_pipeline(target_chat_id=None):
 
 
 # ── Scheduled digest jobs ─────────────────────────────────────────────────────
-def scheduled_digest():
-    """Called by the scheduler at 7:30AM, 12PM, and 9PM SGT."""
+def broadcast_digest():
+    """
+    Fetch + rank + format the digest ONCE, then send to all registered users.
+    Also always sends to CHAT_ID (admin) even if not in the users table.
+    """
     now_sgt = datetime.datetime.now(SGT)
     logger.info(f"Scheduled digest triggered at {now_sgt.strftime('%H:%M SGT')}")
-    run_digest_pipeline(CHAT_ID)
+    try:
+        db.init_db()
+        all_posts = fetch_all_sources()
+        if not all_posts:
+            logger.warning("No posts fetched from any source.")
+            send_message(CHAT_ID, "SG News: Could not fetch any posts right now.")
+            return
+        logger.info(f"Fetched {len(all_posts)} posts total")
+        fresh = [p for p in all_posts if not db.is_already_sent(p)]
+        skipped = len(all_posts) - len(fresh)
+        if skipped:
+            logger.info(f"Filtered {skipped} already-sent posts -- {len(fresh)} fresh remain")
+        MIN_FRESH = 5
+        if len(fresh) < MIN_FRESH:
+            logger.warning(
+                f"Only {len(fresh)} fresh posts after dedup (threshold={MIN_FRESH}). "
+                f"Ignoring dedup -- using all {len(all_posts)} posts."
+            )
+            posts_to_rank = all_posts
+        else:
+            posts_to_rank = fresh
+        ranked = rank_posts(posts_to_rank)
+        logger.info(f"Ranked {len(ranked)} posts for digest")
+        chunks = format_digest_chunks(ranked)
+        logger.info(f"Digest split into {len(chunks)} message(s)")
+        # Collect all recipient chat IDs: all users + admin
+        users = db.get_all_users()
+        user_ids = {str(u["chat_id"]) for u in users}
+        user_ids.add(str(CHAT_ID))
+        logger.info(f"Broadcasting to {len(user_ids)} recipients: {user_ids}")
+        for cid in user_ids:
+            try:
+                send_digest_chunks(int(cid), chunks)
+                logger.info(f"Digest sent to {cid}")
+            except Exception as e:
+                logger.error(f"Failed to send digest to {cid}: {e}")
+        db.mark_sent(ranked)
+        db.prune_sent_posts(keep_days=3)
+        logger.info("=== Broadcast digest complete ===")
+    except Exception as e:
+        logger.error(f"broadcast_digest error: {e}", exc_info=True)
+        try:
+            send_message(CHAT_ID, f"Digest error: {e}")
+        except Exception:
+            pass
+
+
+def scheduled_digest():
+    """Called by the scheduler at 7:30AM, 12PM, and 9PM SGT."""
+    broadcast_digest()
 
 
 def _run_scheduler():

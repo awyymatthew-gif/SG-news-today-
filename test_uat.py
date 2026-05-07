@@ -748,6 +748,25 @@ class TestBotListener(unittest.TestCase):
         for p in ranked:
             self.assertTrue(db.is_already_sent(p))
 
+    # T101 -- broadcast_digest sends to all registered users
+    def test_broadcast_digest_sends_to_all_users(self):
+        import listener
+        import db as _db
+        _db.init_db()
+        _db.upsert_user({'chat': {'id': 11111}, 'from': {'username': 'alice', 'first_name': 'Alice'}})
+        _db.upsert_user({'chat': {'id': 22222}, 'from': {'username': 'bob', 'first_name': 'Bob'}})
+        posts = [make_post(title=f"Broadcast-{i}") for i in range(10)]
+        sent_to = []
+        def mock_send_chunks(cid, chunks):
+            sent_to.append(cid)
+        with patch("listener.fetch_all_sources", return_value=posts), \
+             patch("listener.send_digest_chunks", side_effect=mock_send_chunks), \
+             patch("listener.send_message"):
+            listener.broadcast_digest()
+        self.assertIn(11111, sent_to)
+        self.assertIn(22222, sent_to)
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RUNNER
