@@ -43,12 +43,11 @@ REDDIT_SCORE_MULTIPLIER = 2.5
 # Reddit removed — blocked on cloud servers (SSL/IP block by Reddit CDN)
 VARIETY_MATRIX = {
     "cna":        4,   # Core hard news
-    "st":         3,   # Premium editorial
-    "mothership": 2,   # Gen Z-friendly SG news
-    "today":      1,   # Today Online
-    # 5 free slots filled by best remaining score (hwz/other can win here)
+    "st":         4,   # Premium editorial
+    "mothership": 3,   # Gen Z-friendly SG news
+    # 4 free slots filled by best remaining score (hwz/other can win here)
 }
-FREE_SLOTS = 5   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 10 = 5
+FREE_SLOTS = 4   # TOP_N - sum(VARIETY_MATRIX.values()) = 15 - 11 = 4
 
 
 def _source_group(source):

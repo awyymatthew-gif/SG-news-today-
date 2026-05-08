@@ -24,7 +24,6 @@ HWZ_EDMW_URL = "https://forums.hardwarezone.com.sg/forums/eat-drink-man-woman.16
 # Telegram channels to monitor (public)
 TELEGRAM_CHANNELS = [
     "@cnalatest",
-    "@todayonlinesg",
     "@mothershipsg",
     "@TheStraitsTimes",
 ]
