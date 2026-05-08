@@ -6,19 +6,24 @@ registered users when a high-urgency story is detected.
 
 A post triggers an alert if it meets EITHER of two conditions:
 
-  PATH A — Keyword urgency (original)
+  PATH A — Keyword urgency
     1. BREAKING_PREFIXES  — explicit "JUST IN", "BREAKING" etc. in title
     2. URGENCY_KEYWORDS   — high-impact topic words (deaths, disasters, attacks)
     3. SG_RELEVANCE       — story must involve Singapore or Singaporeans
     → score >= URGENCY_THRESHOLD
 
-  PATH B — Reaction spike (new)
+  PATH B — Reaction spike
     The post's reaction count is >= REACTION_SPIKE_MULTIPLIER × the median
     reaction count of all Telegram posts in the current batch.
-    This catches viral stories that don't use explicit breaking-news language.
     → reactions >= median * REACTION_SPIKE_MULTIPLIER AND reactions >= REACTION_MIN_ABS
 
-Each post is only alerted once (uses the same sent_posts dedup table as digests).
+DEDUP — Two-layer deduplication:
+  Layer 1 (exact): db.is_already_sent() — title+source hash, 8-hour window
+  Layer 2 (semantic): story_fingerprint() — normalised keyword set overlap.
+    If a story with >= FINGERPRINT_OVERLAP_THRESHOLD shared keywords was already
+    alerted in this batch, the duplicate is suppressed regardless of source.
+    This prevents the same event (e.g. volcano eruption) from alerting once via
+    ST Telegram and again via HWZ EDMW.
 """
 import re
 import logging
@@ -74,6 +79,40 @@ BREAKING_PREFIX_BONUS = 6    # bonus added when a breaking prefix is matched
 # Path B — reaction spike
 REACTION_SPIKE_MULTIPLIER = 2.5  # post must have >= 2.5x the batch median
 REACTION_MIN_ABS = 300           # and at least 300 total reactions (avoids noise on small channels)
+
+# Semantic dedup
+FINGERPRINT_OVERLAP_THRESHOLD = 3  # shared meaningful words to consider same story
+# Common words to ignore when fingerprinting
+_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can", "its",
+    "it", "this", "that", "these", "those", "after", "before", "during",
+    "into", "over", "under", "about", "up", "out", "new", "more", "also",
+    "says", "said", "say", "amid", "amid", "following", "including",
+    "cna", "st", "straits", "times", "mothership", "hwz", "edmw",
+})
+
+
+def story_fingerprint(post: dict) -> frozenset:
+    """
+    Return a frozenset of meaningful words from the post title.
+    Used to detect cross-source duplicates (same story, different outlet).
+    """
+    title = post.get("title", "").lower()
+    # Remove punctuation
+    title = re.sub(r"[^a-z0-9\s]", " ", title)
+    words = title.split()
+    # Keep words >= 4 chars that aren't stopwords
+    return frozenset(w for w in words if len(w) >= 4 and w not in _STOPWORDS)
+
+
+def _stories_overlap(fp_a: frozenset, fp_b: frozenset) -> bool:
+    """Return True if two story fingerprints share enough keywords."""
+    if not fp_a or not fp_b:
+        return False
+    return len(fp_a & fp_b) >= FINGERPRINT_OVERLAP_THRESHOLD
 
 
 def _urgency_score(post: dict) -> int:
@@ -167,6 +206,11 @@ def check_for_breaking_news(posts: list, db_module) -> list:
     Given a list of fetched posts, return those that qualify as breaking news
     via either Path A (keyword urgency) or Path B (reaction spike).
 
+    Two-layer dedup:
+      1. db.is_already_sent()  — exact title+source hash (8-hour window)
+      2. story_fingerprint()   — semantic overlap within this batch
+         (prevents same event from alerting via multiple sources)
+
     The caller is responsible for calling db.mark_sent() on the returned posts.
     """
     # Compute batch median for Path B
@@ -175,17 +219,34 @@ def check_for_breaking_news(posts: list, db_module) -> list:
         logger.debug(f"Batch median reactions: {median_reactions:.0f}")
 
     alerts = []
+    alerted_fingerprints = []  # fingerprints of stories already queued this batch
+
     for post in posts:
         if not is_breaking(post, median_reactions):
             continue
-        # Dedup: skip if already alerted within the last 8 hours
+
+        # Layer 1: exact dedup via DB
         if db_module.is_already_sent(post):
             continue
+
+        # Layer 2: semantic dedup within this batch
+        fp = story_fingerprint(post)
+        duplicate = any(_stories_overlap(fp, prev_fp) for prev_fp in alerted_fingerprints)
+        if duplicate:
+            logger.info(
+                f"Semantic dedup suppressed cross-source duplicate: "
+                f"{post.get('source', '')} — {post.get('title', '')[:60]}"
+            )
+            continue
+
+        alerted_fingerprints.append(fp)
         alerts.append(post)
+
         score = _urgency_score(post)
         rxn   = post.get("reactions", 0)
         path  = "A(keywords)" if score >= URGENCY_THRESHOLD else f"B(reactions={rxn}, median={median_reactions:.0f})"
         logger.info(
             f"Breaking news [{path}]: {post.get('title', '')[:80]}"
         )
+
     return alerts

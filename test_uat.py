@@ -865,6 +865,68 @@ class TestBreaking(unittest.TestCase):
         median = _batch_median_reactions(posts)
         self.assertEqual(median, 400.0)
 
+
+    # T111 -- same story from two sources: second should be suppressed
+    def test_semantic_dedup_suppresses_cross_source_duplicate(self):
+        from breaking import check_for_breaking_news, story_fingerprint
+        import db as _db
+        _db.init_db()
+        st_post = {
+            'title': 'The authorities are rushing to rescue 20 hikers, including 9 Singaporeans, after the eruption of Mount Dukono in Indonesia',
+            'source': 'Telegram @TheStraitsTimes',
+            'url': 'https://str.sg/wYq2y',
+            'reactions': 621,
+            'body': '',
+            'created_utc': __import__("time").time(),
+        }
+        hwz_post = {
+            'title': 'CNA: Indonesian authorities search for 3 hikers missing after Mount Dukono eruption, 17 evacuated',
+            'source': 'HWZ EDMW',
+            'url': 'https://forums.hardwarezone.com.sg/threads/xyz.123/',
+            'reactions': 0,
+            'body': '',
+            'created_utc': __import__("time").time(),
+        }
+        alerts = check_for_breaking_news([st_post, hwz_post], _db)
+        # Only ONE alert should fire — the second is a semantic duplicate
+        self.assertEqual(len(alerts), 1)
+
+    # T112 -- two genuinely different stories should both alert
+    def test_semantic_dedup_allows_different_stories(self):
+        from breaking import check_for_breaking_news
+        import db as _db
+        _db.init_db()
+        import time as _time
+        story1 = {
+            'title': 'JUST IN: Singaporean killed in road accident in Johor',
+            'source': 'Telegram @TheStraitsTimes',
+            'url': 'https://str.sg/abc',
+            'reactions': 100,
+            'body': '',
+            'created_utc': _time.time(),
+        }
+        story2 = {
+            'title': 'BREAKING: MRT North-South Line disruption, evacuation underway at Bishan',
+            'source': 'Telegram @CNAsg',
+            'url': 'https://cna.asia/xyz',
+            'reactions': 100,
+            'body': '',
+            'created_utc': _time.time(),
+        }
+        alerts = check_for_breaking_news([story1, story2], _db)
+        self.assertEqual(len(alerts), 2)
+
+    # T113 -- story_fingerprint strips stopwords and short words
+    def test_story_fingerprint_strips_stopwords(self):
+        from breaking import story_fingerprint
+        post = {'title': 'The authorities are rushing to rescue the hikers from the volcano'}
+        fp = story_fingerprint(post)
+        self.assertNotIn('the', fp)
+        self.assertNotIn('are', fp)
+        self.assertIn('authorities', fp)
+        self.assertIn('hikers', fp)
+        self.assertIn('volcano', fp)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RUNNER
 # ─────────────────────────────────────────────────────────────────────────────
