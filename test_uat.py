@@ -768,6 +768,73 @@ class TestBotListener(unittest.TestCase):
 
 
 
+
+# =============================================================================
+# T102-T107  Breaking News Detector
+# =============================================================================
+class TestBreaking(unittest.TestCase):
+    """Tests for breaking.py urgency scoring and alert formatting."""
+
+    def _post(self, title, source="CNA", body=""):
+        return {
+            "title": title,
+            "source": source,
+            "url": "https://example.com/story",
+            "body": body,
+            "created_utc": __import__("time").time(),
+        }
+
+    # T102 -- volcano story with Singaporeans should trigger
+    def test_volcano_with_singaporeans_triggers(self):
+        from breaking import is_breaking
+        post = self._post(
+            "JUST IN: 2 Singaporean hikers dead following eruption of Mount Dukono in Indonesia"
+        )
+        self.assertTrue(is_breaking(post))
+
+    # T103 -- normal SG story should NOT trigger
+    def test_normal_story_does_not_trigger(self):
+        from breaking import is_breaking
+        post = self._post("New hawker centre to open in Tampines next year")
+        self.assertFalse(is_breaking(post))
+
+    # T104 -- non-SG disaster should NOT trigger
+    def test_non_sg_disaster_does_not_trigger(self):
+        from breaking import is_breaking
+        post = self._post("Explosion kills 10 in Ukraine", source="Reuters")
+        self.assertFalse(is_breaking(post))
+
+    # T105 -- MRT disruption with evacuation should trigger
+    def test_mrt_disruption_triggers(self):
+        from breaking import is_breaking
+        post = self._post(
+            "BREAKING: Major MRT disruption on North-South Line, evacuation underway"
+        )
+        self.assertTrue(is_breaking(post))
+
+    # T106 -- format_breaking_alert includes emoji, title, source, url
+    def test_format_breaking_alert_structure(self):
+        from breaking import format_breaking_alert
+        post = self._post("JUST IN: Singaporean killed in crash", source="ST", )
+        post["url"] = "https://str.sg/abc"
+        alert = format_breaking_alert(post)
+        self.assertIn("BREAKING", alert)
+        self.assertIn("Singaporean killed", alert)
+        self.assertIn("str.sg", alert)
+
+    # T107 -- check_for_breaking_news skips already-sent posts
+    def test_already_sent_posts_skipped(self):
+        from breaking import check_for_breaking_news
+        import db as _db
+        _db.init_db()
+        post = self._post(
+            "JUST IN: 3 Singaporeans dead in Indonesia volcano eruption"
+        )
+        # Mark it as sent first
+        _db.mark_sent([post])
+        alerts = check_for_breaking_news([post], _db)
+        self.assertEqual(len(alerts), 0)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RUNNER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -775,7 +842,7 @@ class TestBotListener(unittest.TestCase):
 if __name__ == "__main__":
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
-    for cls in [TestDB, TestScorer, TestDigest, TestSources, TestBotListener]:
+    for cls in [TestDB, TestScorer, TestDigest, TestSources, TestBotListener, TestBreaking]:
         suite.addTests(loader.loadTestsFromTestCase(cls))
 
     runner = unittest.TextTestRunner(verbosity=2)

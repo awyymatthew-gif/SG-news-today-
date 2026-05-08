@@ -23,6 +23,7 @@ import db
 from sources import fetch_all_sources
 from scorer import rank_posts
 from digest import format_digest_chunks
+from breaking import check_for_breaking_news, format_breaking_alert
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -214,6 +215,40 @@ def broadcast_digest():
             pass
 
 
+# ── Breaking news monitor ────────────────────────────────────────────────────
+def run_breaking_news_check():
+    """
+    Fetch all sources, detect breaking news, and push instant alerts to all
+    registered users. Runs every 15 minutes via the scheduler.
+    """
+    try:
+        db.init_db()
+        all_posts = fetch_all_sources()
+        if not all_posts:
+            return
+        alerts = check_for_breaking_news(all_posts, db)
+        if not alerts:
+            return
+        # Collect recipients: all users + admin
+        users = db.get_all_users()
+        user_ids = {str(u["chat_id"]) for u in users}
+        user_ids.add(str(CHAT_ID))
+        for post in alerts:
+            msg = format_breaking_alert(post)
+            logger.info(
+                f"Breaking alert -> {len(user_ids)} users: {post.get('title', '')[:60]}"
+            )
+            for cid in user_ids:
+                try:
+                    send_message(int(cid), msg, parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Failed to send breaking alert to {cid}: {e}")
+        # Mark alerted posts as sent so they don't re-trigger
+        db.mark_sent(alerts)
+    except Exception as e:
+        logger.error(f"run_breaking_news_check error: {e}", exc_info=True)
+
+
 def scheduled_digest():
     """Called by the scheduler at 7:30AM, 12PM, and 9PM SGT."""
     broadcast_digest()
@@ -239,6 +274,9 @@ def setup_schedule():
     schedule.every().day.at("04:00").do(scheduled_digest)  # 12:00 PM SGT
     schedule.every().day.at("13:00").do(scheduled_digest)  # 9:00 PM SGT
     logger.info("Scheduled: 23:30 UTC (7:30AM SGT), 04:00 UTC (12PM SGT), 13:00 UTC (9PM SGT)")
+    # Breaking news monitor: every 15 minutes
+    schedule.every(15).minutes.do(run_breaking_news_check)
+    logger.info("Breaking news monitor: polling every 15 minutes")
 
 
 # ── /digest command ───────────────────────────────────────────────────────────
