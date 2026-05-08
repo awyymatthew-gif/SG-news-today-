@@ -835,6 +835,36 @@ class TestBreaking(unittest.TestCase):
         alerts = check_for_breaking_news([post], _db)
         self.assertEqual(len(alerts), 0)
 
+
+    # T108 -- reaction spike triggers even without urgency keywords
+    def test_reaction_spike_triggers_without_keywords(self):
+        from breaking import is_breaking
+        # Viral story with no urgency keywords but very high reactions
+        post = self._post('Singapore man wins world record for eating 100 chilli crabs')
+        post['reactions'] = 1500
+        # Median of 400 -> spike threshold = 400 * 2.5 = 1000 -> 1500 qualifies
+        self.assertTrue(is_breaking(post, median_reactions=400.0))
+
+    # T109 -- reaction spike below threshold does NOT trigger
+    def test_reaction_below_threshold_does_not_trigger(self):
+        from breaking import is_breaking
+        post = self._post('Singapore man wins world record for eating 100 chilli crabs')
+        post['reactions'] = 600
+        # 600 < 400 * 2.5 = 1000 -> no alert
+        self.assertFalse(is_breaking(post, median_reactions=400.0))
+
+    # T110 -- batch_median_reactions computed correctly
+    def test_batch_median_reactions(self):
+        from breaking import _batch_median_reactions
+        posts = [
+            {'reactions': 100, 'title': 'a'},
+            {'reactions': 400, 'title': 'b'},
+            {'reactions': 600, 'title': 'c'},
+            {'title': 'd'},  # no reactions key
+        ]
+        median = _batch_median_reactions(posts)
+        self.assertEqual(median, 400.0)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RUNNER
 # ─────────────────────────────────────────────────────────────────────────────

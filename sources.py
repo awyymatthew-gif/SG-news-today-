@@ -234,6 +234,15 @@ def fetch_telegram_channels():
                         except Exception:
                             pass
 
+                    # Reaction count (sum of all emoji reactions on this post)
+                    reactions = 0
+                    react_div = msg.select_one(".tgme_widget_message_reactions")
+                    if react_div:
+                        for span in react_div.select(".tgme_reaction"):
+                            num_str = "".join(c for c in span.get_text(strip=True) if c.isdigit())
+                            if num_str:
+                                reactions += int(num_str)
+
                     # Use full text as title — no truncation
                     # For Telegram posts, take first sentence or first 300 chars as headline
                     headline = text
@@ -254,6 +263,7 @@ def fetch_telegram_channels():
                         "title": headline,
                         "url": msg_url,
                         "score": views,
+                        "reactions": reactions,
                         "comments": 0,
                         "created_utc": created_utc,
                         "text": text,
