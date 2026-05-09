@@ -836,14 +836,28 @@ class TestBreaking(unittest.TestCase):
         self.assertEqual(len(alerts), 0)
 
 
-    # T108 -- reaction spike triggers even without urgency keywords
+    # T108 -- reaction spike triggers for SG-relevant story even without urgency keywords
     def test_reaction_spike_triggers_without_keywords(self):
         from breaking import is_breaking
-        # Viral story with no urgency keywords but very high reactions
+        # Viral SG story with no urgency keywords but very high reactions
         post = self._post('Singapore man wins world record for eating 100 chilli crabs')
         post['reactions'] = 1500
         # Median of 400 -> spike threshold = 400 * 2.5 = 1000 -> 1500 qualifies
+        # SG relevance: 'singapore' is present
         self.assertTrue(is_breaking(post, median_reactions=400.0))
+    # T114 -- reaction spike does NOT trigger for non-SG viral/entertainment story
+    def test_reaction_spike_non_sg_story_does_not_trigger(self):
+        from breaking import is_breaking
+        # French cyclist story: viral, high reactions, but NO SG relevance
+        post = {
+            'title': 'A 20-year-old French cyclist raced on despite ripping his shorts & bum due to a crash. Hope he wasn t too bummed out.',
+            'source': 'Telegram @mothershipsg',
+            'body': '',
+            'reactions': 820,
+        }
+        # Even with a spike (820 > 400 * 2.5 = 1000? No, 820 < 1000 but let's use median=200)
+        # With median=200, spike threshold=500, 820>500 BUT no SG relevance -> no alert
+        self.assertFalse(is_breaking(post, median_reactions=200.0))
 
     # T109 -- reaction spike below threshold does NOT trigger
     def test_reaction_below_threshold_does_not_trigger(self):

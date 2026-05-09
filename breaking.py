@@ -15,17 +15,23 @@ A post triggers an alert if it meets EITHER of two conditions:
   PATH B — Reaction spike
     The post's reaction count is >= REACTION_SPIKE_MULTIPLIER × the median
     reaction count of all Telegram posts in the current batch.
-    → reactions >= median * REACTION_SPIKE_MULTIPLIER AND reactions >= REACTION_MIN_ABS
+    ALSO requires SG relevance — pure viral/entertainment stories are excluded.
+    → reactions >= median * REACTION_SPIKE_MULTIPLIER
+      AND reactions >= REACTION_MIN_ABS
+      AND story has SG relevance
 
 DEDUP — Two-layer deduplication:
   Layer 1 (exact): db.is_already_sent() — title+source hash, 8-hour window
   Layer 2 (semantic): story_fingerprint() — normalised keyword set overlap.
-    If a story with >= FINGERPRINT_OVERLAP_THRESHOLD shared keywords was already
-    alerted in this batch, the duplicate is suppressed regardless of source.
-    This prevents the same event (e.g. volcano eruption) from alerting once via
-    ST Telegram and again via HWZ EDMW.
+    Checks BOTH:
+      a) Within-batch: fingerprints of stories already queued this run
+      b) Cross-batch:  fingerprints stored in DB from the last 8 hours
+    This prevents the same event (e.g. volcano eruption) from alerting once
+    via ST Telegram and again via HWZ EDMW, AND prevents follow-up updates
+    on the same story from re-alerting hours later.
 """
 import re
+import json
 import logging
 import statistics
 
@@ -109,8 +115,10 @@ _STOPWORDS = frozenset({
     "would", "could", "should", "may", "might", "shall", "can", "its",
     "it", "this", "that", "these", "those", "after", "before", "during",
     "into", "over", "under", "about", "up", "out", "new", "more", "also",
-    "says", "said", "say", "amid", "amid", "following", "including",
+    "says", "said", "say", "amid", "following", "including", "two", "three",
     "cna", "st", "straits", "times", "mothership", "hwz", "edmw",
+    # Numbers as words
+    "one", "four", "five", "six", "seven", "eight", "nine", "ten",
 })
 
 
@@ -132,6 +140,14 @@ def _stories_overlap(fp_a: frozenset, fp_b: frozenset) -> bool:
     if not fp_a or not fp_b:
         return False
     return len(fp_a & fp_b) >= FINGERPRINT_OVERLAP_THRESHOLD
+
+
+def _has_sg_relevance(post: dict) -> bool:
+    """Return True if the post has Singapore relevance."""
+    title = post.get("title", "").lower()
+    body  = post.get("body", "").lower()
+    text  = title + " " + body
+    return any(kw in text for kw in SG_RELEVANCE_KEYWORDS)
 
 
 def _urgency_score(post: dict) -> int:
@@ -172,7 +188,13 @@ def _reaction_spike(post: dict, median_reactions: float) -> bool:
     """
     Return True if this post's reaction count is a significant spike above
     the batch median (Path B).
+
+    REQUIRES SG relevance — pure viral/entertainment stories (e.g. funny
+    cycling videos) are excluded even if they have high reaction counts.
     """
+    # Path B requires SG relevance to prevent viral entertainment stories
+    if not _has_sg_relevance(post):
+        return False
     reactions = post.get("reactions", 0)
     if reactions < REACTION_MIN_ABS:
         return False
@@ -198,7 +220,7 @@ def is_breaking(post: dict, median_reactions: float = 0.0) -> bool:
     # Path A: keyword urgency
     if _urgency_score(post) >= URGENCY_THRESHOLD:
         return True
-    # Path B: reaction spike
+    # Path B: reaction spike (SG relevance required)
     if _reaction_spike(post, median_reactions):
         return True
     return False
@@ -225,15 +247,43 @@ def format_breaking_alert(post: dict, reason: str = "") -> str:
     return "\n".join(lines)
 
 
+def _get_recent_alert_fingerprints(db_module) -> list:
+    """
+    Retrieve story fingerprints of breaking alerts sent in the last 8 hours
+    from the DB, for cross-batch semantic dedup.
+    Returns a list of frozensets.
+    """
+    try:
+        raw = db_module.get_state("breaking_fingerprints_8h", "[]")
+        stored = json.loads(raw)
+        return [frozenset(fp) for fp in stored]
+    except Exception:
+        return []
+
+
+def _save_alert_fingerprints(db_module, fingerprints: list):
+    """
+    Persist the current list of alerted story fingerprints to the DB.
+    Overwrites the previous value (caller manages the full list).
+    """
+    try:
+        serialisable = [list(fp) for fp in fingerprints]
+        db_module.set_state("breaking_fingerprints_8h", json.dumps(serialisable))
+    except Exception as e:
+        logger.warning(f"Could not save breaking fingerprints: {e}")
+
+
 def check_for_breaking_news(posts: list, db_module) -> list:
     """
     Given a list of fetched posts, return those that qualify as breaking news
     via either Path A (keyword urgency) or Path B (reaction spike).
 
-    Two-layer dedup:
+    Three-layer dedup:
       1. db.is_already_sent()  — exact title+source hash (8-hour window)
-      2. story_fingerprint()   — semantic overlap within this batch
-         (prevents same event from alerting via multiple sources)
+      2. Within-batch semantic — fingerprint overlap with stories already
+         queued in this run (prevents same event via multiple sources)
+      3. Cross-batch semantic  — fingerprint overlap with stories alerted
+         in the last 8 hours (prevents follow-up updates re-alerting)
 
     The caller is responsible for calling db.mark_sent() on the returned posts.
     """
@@ -242,8 +292,11 @@ def check_for_breaking_news(posts: list, db_module) -> list:
     if median_reactions > 0:
         logger.debug(f"Batch median reactions: {median_reactions:.0f}")
 
+    # Load fingerprints from previous batches (cross-batch dedup)
+    historical_fingerprints = _get_recent_alert_fingerprints(db_module)
+
     alerts = []
-    alerted_fingerprints = []  # fingerprints of stories already queued this batch
+    alerted_fingerprints = list(historical_fingerprints)  # start with history
 
     for post in posts:
         if not is_breaking(post, median_reactions):
@@ -253,12 +306,12 @@ def check_for_breaking_news(posts: list, db_module) -> list:
         if db_module.is_already_sent(post):
             continue
 
-        # Layer 2: semantic dedup within this batch
+        # Layer 2 & 3: semantic dedup (within-batch + cross-batch)
         fp = story_fingerprint(post)
         duplicate = any(_stories_overlap(fp, prev_fp) for prev_fp in alerted_fingerprints)
         if duplicate:
             logger.info(
-                f"Semantic dedup suppressed cross-source duplicate: "
+                f"Semantic dedup suppressed duplicate: "
                 f"{post.get('source', '')} — {post.get('title', '')[:60]}"
             )
             continue
@@ -272,5 +325,10 @@ def check_for_breaking_news(posts: list, db_module) -> list:
         logger.info(
             f"Breaking news [{path}]: {post.get('title', '')[:80]}"
         )
+
+    # Persist updated fingerprints (only new ones, not the historical ones we loaded)
+    new_fps = alerted_fingerprints[len(historical_fingerprints):]
+    if new_fps:
+        _save_alert_fingerprints(db_module, alerted_fingerprints)
 
     return alerts
