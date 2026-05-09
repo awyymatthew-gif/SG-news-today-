@@ -59,21 +59,40 @@ URGENCY_KEYWORDS = {
     "resign": 3, "arrested": 3, "charged": 3, "convicted": 3,
     "assassination": 5, "coup": 5,
     # Singapore-specific high-impact
-    "haze": 3, "psi": 3, "dengue cluster": 3, "mrt disruption": 3,
-    "power outage": 3, "water disruption": 3,
+    "haze": 3, "psi": 3,
+    "disruption": 3,   # covers MRT/bus/power/water disruptions
+    "outage": 3,       # power outage, water outage
+    "dengue": 3,       # dengue cluster
 }
 
 # ── Singapore relevance keywords ──────────────────────────────────────────────
 SG_RELEVANCE_KEYWORDS = [
     "singapore", "singaporean", "singaporeans", "sg", "spore",
+    # Major towns / estates
     "changi", "jurong", "orchard", "woodlands", "tampines", "bedok",
+    "toa payoh", "ang mo kio", "bishan", "clementi", "punggol", "sengkang",
+    "yishun", "hougang", "pasir ris", "bukit timah", "novena", "geylang",
+    "queenstown", "kallang", "marine parade", "buona vista",
+    # Institutions / agencies
     "mrt", "hdb", "cpf", "pap", "spf", "saf", "mindef", "moh", "mfa",
+    "scdf", "ica", "mas", "lta", "nea", "moe",
     "pm lawrence", "pm wong", "minister", "parliament",
-    "indonesia", "malaysia", "johor",  # nearby — relevant to SG readers
+    # Note: indonesia/malaysia/johor intentionally excluded — a story about
+    # those countries only qualifies if it explicitly mentions Singaporeans.
+]
+
+# SG-specific locations/institutions that add +1 bonus to urgency score
+# (helps borderline stories like MRT disruption or dengue cluster reach threshold)
+SG_LOCATION_BONUS_KEYWORDS = [
+    "singapore", "singaporean", "singaporeans",
+    "changi", "jurong", "orchard", "woodlands", "tampines", "bedok",
+    "toa payoh", "ang mo kio", "bishan", "clementi", "punggol", "sengkang",
+    "yishun", "hougang", "pasir ris", "bukit timah", "novena",
+    "mrt", "hdb", "spf", "saf", "cpf",
 ]
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
-URGENCY_THRESHOLD = 5        # minimum keyword urgency score to trigger (Path A)
+URGENCY_THRESHOLD = 4        # minimum keyword urgency score to trigger (Path A)
 BREAKING_PREFIX_BONUS = 6    # bonus added when a breaking prefix is matched
 
 # Path B — reaction spike
@@ -140,6 +159,11 @@ def _urgency_score(post: dict) -> int:
     for kw, weight in URGENCY_KEYWORDS.items():
         if kw in text:
             score += weight
+
+    # SG location/institution bonus: +1 if a specific SG place or body is named
+    # This helps borderline stories (MRT disruption, dengue cluster) reach threshold
+    if score > 0 and any(kw in text for kw in SG_LOCATION_BONUS_KEYWORDS):
+        score += 1
 
     return score
 
