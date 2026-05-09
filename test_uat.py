@@ -773,177 +773,176 @@ class TestBotListener(unittest.TestCase):
 # T102-T107  Breaking News Detector
 # =============================================================================
 class TestBreaking(unittest.TestCase):
-    """Tests for breaking.py urgency scoring and alert formatting."""
+    """Tests for the breaking news reaction-spike detector."""
 
-    def _post(self, title, source="CNA", body=""):
+    def setUp(self):
+        import db as _db
+        _db.init_db()
+
+    def _post(self, title, source="Telegram @TheStraitsTimes", reactions=0):
+        import time as _time
         return {
             "title": title,
             "source": source,
-            "url": "https://example.com/story",
-            "body": body,
-            "created_utc": __import__("time").time(),
+            "url": "https://example.com/news",
+            "body": "",
+            "reactions": reactions,
+            "created_utc": _time.time(),
         }
 
-    # T102 -- volcano story with Singaporeans should trigger
-    def test_volcano_with_singaporeans_triggers(self):
-        from breaking import is_breaking
-        post = self._post(
-            "JUST IN: 2 Singaporean hikers dead following eruption of Mount Dukono in Indonesia"
-        )
-        self.assertTrue(is_breaking(post))
+    def _make_channel_medians(self, st_median=430.0, ms_median=750.0):
+        return {
+            "Telegram @TheStraitsTimes": st_median,
+            "Telegram @cnalatest": st_median,
+            "Telegram @mothershipsg": ms_median,
+        }
 
-    # T103 -- normal SG story should NOT trigger
-    def test_normal_story_does_not_trigger(self):
+    # T102 -- reaction spike triggers when post is >= 5x channel median
+    def test_reaction_spike_triggers(self):
         from breaking import is_breaking
-        post = self._post("New hawker centre to open in Tampines next year")
-        self.assertFalse(is_breaking(post))
+        post = self._post("9 Singaporeans trapped after volcano eruption",
+                          reactions=2500)
+        medians = self._make_channel_medians(st_median=430.0)
+        # 2500 / 430 = 5.8x >= 5x threshold -> ALERT
+        self.assertTrue(is_breaking(post, medians))
 
-    # T104 -- non-SG disaster should NOT trigger
-    def test_non_sg_disaster_does_not_trigger(self):
+    # T103 -- reaction spike does NOT trigger when below 5x threshold
+    def test_reaction_below_spike_threshold_does_not_trigger(self):
         from breaking import is_breaking
-        post = self._post("Explosion kills 10 in Ukraine", source="Reuters")
-        self.assertFalse(is_breaking(post))
+        post = self._post("Singapore universities hit by cyberattack",
+                          reactions=500)
+        medians = self._make_channel_medians(st_median=430.0)
+        # 500 / 430 = 1.2x < 5x -> no alert
+        self.assertFalse(is_breaking(post, medians))
 
-    # T105 -- MRT disruption with evacuation should trigger
-    def test_mrt_disruption_triggers(self):
+    # T104 -- reaction spike does NOT trigger when below absolute minimum
+    def test_reaction_below_absolute_minimum_does_not_trigger(self):
         from breaking import is_breaking
-        post = self._post(
-            "BREAKING: Major MRT disruption on North-South Line, evacuation underway"
-        )
-        self.assertTrue(is_breaking(post))
+        post = self._post("Amos Yee banned from anime convention",
+                          source="Telegram @mothershipsg", reactions=306)
+        medians = self._make_channel_medians(ms_median=100.0)
+        # 306 < SPIKE_MIN_ABS=500 -> no alert regardless of ratio
+        self.assertFalse(is_breaking(post, medians))
 
-    # T106 -- format_breaking_alert includes emoji, title, source, url
+    # T105 -- viral entertainment story does NOT trigger (no SG spike, low ratio)
+    def test_viral_entertainment_does_not_trigger(self):
+        from breaking import is_breaking
+        post = self._post("French cyclist raced on despite ripping his shorts",
+                          source="Telegram @mothershipsg", reactions=820)
+        medians = self._make_channel_medians(ms_median=750.0)
+        # 820 / 750 = 1.1x < 5x -> no alert
+        self.assertFalse(is_breaking(post, medians))
+
+    # T106 -- story with no channel median does NOT trigger
+    def test_no_channel_median_does_not_trigger(self):
+        from breaking import is_breaking
+        post = self._post("Breaking: huge event", reactions=9999)
+        # Empty medians dict -> no baseline -> no alert
+        self.assertFalse(is_breaking(post, {}))
+
+    # T107 -- format_breaking_alert includes title, source, reactions, url
     def test_format_breaking_alert_structure(self):
         from breaking import format_breaking_alert
-        post = self._post("JUST IN: Singaporean killed in crash", source="ST", )
+        post = self._post("Major disaster in Singapore", reactions=3000)
         post["url"] = "https://str.sg/abc"
-        alert = format_breaking_alert(post)
-        self.assertIn("BREAKING", alert)
-        self.assertIn("Singaporean killed", alert)
-        self.assertIn("str.sg", alert)
+        msg = format_breaking_alert(post)
+        self.assertIn("BREAKING NEWS", msg)
+        self.assertIn("Major disaster", msg)
+        self.assertIn("3,000", msg)
+        self.assertIn("https://str.sg/abc", msg)
 
-    # T107 -- check_for_breaking_news skips already-sent posts
+    # T108 -- batch_channel_medians computed correctly per channel
+    def test_channel_medians_computed_correctly(self):
+        from breaking import _channel_medians
+        posts = [
+            {"source": "Telegram @TheStraitsTimes", "reactions": 300},
+            {"source": "Telegram @TheStraitsTimes", "reactions": 500},
+            {"source": "Telegram @TheStraitsTimes", "reactions": 400},
+            {"source": "Telegram @mothershipsg",    "reactions": 700},
+            {"source": "Telegram @mothershipsg",    "reactions": 900},
+        ]
+        medians = _channel_medians(posts)
+        self.assertEqual(medians["Telegram @TheStraitsTimes"], 400.0)
+        self.assertEqual(medians["Telegram @mothershipsg"],    800.0)
+
+    # T109 -- already-sent posts are skipped
     def test_already_sent_posts_skipped(self):
         from breaking import check_for_breaking_news
         import db as _db
-        _db.init_db()
-        post = self._post(
-            "JUST IN: 3 Singaporeans dead in Indonesia volcano eruption"
-        )
-        # Mark it as sent first
+        post = self._post("Massive earthquake hits Singapore", reactions=3000)
+        medians = self._make_channel_medians(st_median=430.0)
+        # Mark as sent first
         _db.mark_sent([post])
         alerts = check_for_breaking_news([post], _db)
         self.assertEqual(len(alerts), 0)
 
-
-    # T108 -- reaction spike triggers for SG-relevant story even without urgency keywords
-    def test_reaction_spike_triggers_without_keywords(self):
-        from breaking import is_breaking
-        # Viral SG story with no urgency keywords but very high reactions
-        post = self._post('Singapore man wins world record for eating 100 chilli crabs')
-        post['reactions'] = 1500
-        # Median of 400 -> spike threshold = 400 * 2.5 = 1000 -> 1500 qualifies
-        # SG relevance: 'singapore' is present
-        self.assertTrue(is_breaking(post, median_reactions=400.0))
-    # T114 -- reaction spike does NOT trigger for non-SG viral/entertainment story
-    def test_reaction_spike_non_sg_story_does_not_trigger(self):
-        from breaking import is_breaking
-        # French cyclist story: viral, high reactions, but NO SG relevance
-        post = {
-            'title': 'A 20-year-old French cyclist raced on despite ripping his shorts & bum due to a crash. Hope he wasn t too bummed out.',
-            'source': 'Telegram @mothershipsg',
-            'body': '',
-            'reactions': 820,
-        }
-        # Even with a spike (820 > 400 * 2.5 = 1000? No, 820 < 1000 but let's use median=200)
-        # With median=200, spike threshold=500, 820>500 BUT no SG relevance -> no alert
-        self.assertFalse(is_breaking(post, median_reactions=200.0))
-
-    # T109 -- reaction spike below threshold does NOT trigger
-    def test_reaction_below_threshold_does_not_trigger(self):
-        from breaking import is_breaking
-        post = self._post('Singapore man wins world record for eating 100 chilli crabs')
-        post['reactions'] = 600
-        # 600 < 400 * 2.5 = 1000 -> no alert
-        self.assertFalse(is_breaking(post, median_reactions=400.0))
-
-    # T110 -- batch_median_reactions computed correctly
-    def test_batch_median_reactions(self):
-        from breaking import _batch_median_reactions
-        posts = [
-            {'reactions': 100, 'title': 'a'},
-            {'reactions': 400, 'title': 'b'},
-            {'reactions': 600, 'title': 'c'},
-            {'title': 'd'},  # no reactions key
-        ]
-        median = _batch_median_reactions(posts)
-        self.assertEqual(median, 400.0)
-
-
-    # T111 -- same story from two sources: second should be suppressed
+    # T110 -- same story from two sources: only one alert fires (semantic dedup)
     def test_semantic_dedup_suppresses_cross_source_duplicate(self):
-        from breaking import check_for_breaking_news, story_fingerprint
-        import db as _db
-        _db.init_db()
-        st_post = {
-            'title': 'The authorities are rushing to rescue 20 hikers, including 9 Singaporeans, after the eruption of Mount Dukono in Indonesia',
-            'source': 'Telegram @TheStraitsTimes',
-            'url': 'https://str.sg/wYq2y',
-            'reactions': 621,
-            'body': '',
-            'created_utc': __import__("time").time(),
-        }
-        hwz_post = {
-            'title': 'CNA: Indonesian authorities search for 3 hikers missing after Mount Dukono eruption, 17 evacuated',
-            'source': 'HWZ EDMW',
-            'url': 'https://forums.hardwarezone.com.sg/threads/xyz.123/',
-            'reactions': 0,
-            'body': '',
-            'created_utc': __import__("time").time(),
-        }
-        alerts = check_for_breaking_news([st_post, hwz_post], _db)
-        # Only ONE alert should fire — the second is a semantic duplicate
-        self.assertEqual(len(alerts), 1)
-
-    # T112 -- two genuinely different stories should both alert
-    def test_semantic_dedup_allows_different_stories(self):
         from breaking import check_for_breaking_news
         import db as _db
         _db.init_db()
         import time as _time
+        st_post = {
+            "title": "The authorities are rushing to rescue 20 hikers including 9 Singaporeans after the eruption of Mount Dukono",
+            "source": "Telegram @TheStraitsTimes",
+            "url": "https://str.sg/wYq2y",
+            "reactions": 2500,
+            "body": "",
+            "created_utc": _time.time(),
+        }
+        hwz_post = {
+            "title": "CNA: Indonesian authorities search for 3 hikers missing after Mount Dukono eruption 17 evacuated",
+            "source": "Telegram @cnalatest",
+            "url": "https://t.me/cnalatest/21875",
+            "reactions": 2400,
+            "body": "",
+            "created_utc": _time.time(),
+        }
+        # Both are spikes vs their channel median of 430
+        medians = {"Telegram @TheStraitsTimes": 430.0, "Telegram @cnalatest": 430.0}
+        # Inject medians by patching _channel_medians
+        import unittest.mock as mock
+        with mock.patch("breaking._channel_medians", return_value=medians):
+            alerts = check_for_breaking_news([st_post, hwz_post], _db)
+        self.assertEqual(len(alerts), 1)
+
+    # T111 -- two genuinely different stories both alert
+    def test_semantic_dedup_allows_different_stories(self):
+        from breaking import check_for_breaking_news
+        import db as _db
+        _db.init_db()
+        import time as _time, unittest.mock as mock
         story1 = {
-            'title': 'JUST IN: Singaporean killed in road accident in Johor',
-            'source': 'Telegram @TheStraitsTimes',
-            'url': 'https://str.sg/abc',
-            'reactions': 100,
-            'body': '',
-            'created_utc': _time.time(),
+            "title": "Massive flood hits Orchard Road Singapore",
+            "source": "Telegram @TheStraitsTimes",
+            "url": "https://str.sg/flood",
+            "reactions": 3000,
+            "body": "",
+            "created_utc": _time.time(),
         }
         story2 = {
-            'title': 'BREAKING: MRT North-South Line disruption, evacuation underway at Bishan',
-            'source': 'Telegram @CNAsg',
-            'url': 'https://cna.asia/xyz',
-            'reactions': 100,
-            'body': '',
-            'created_utc': _time.time(),
+            "title": "Bomb explosion at Changi Airport terminal",
+            "source": "Telegram @cnalatest",
+            "url": "https://cna.asia/bomb",
+            "reactions": 2800,
+            "body": "",
+            "created_utc": _time.time(),
         }
-        alerts = check_for_breaking_news([story1, story2], _db)
+        medians = {"Telegram @TheStraitsTimes": 430.0, "Telegram @cnalatest": 430.0}
+        with mock.patch("breaking._channel_medians", return_value=medians):
+            alerts = check_for_breaking_news([story1, story2], _db)
         self.assertEqual(len(alerts), 2)
 
-    # T113 -- story_fingerprint strips stopwords and short words
+    # T112 -- story fingerprint strips stopwords and short words
     def test_story_fingerprint_strips_stopwords(self):
         from breaking import story_fingerprint
-        post = {'title': 'The authorities are rushing to rescue the hikers from the volcano'}
+        post = {"title": "The authorities are rushing to rescue Singaporeans"}
         fp = story_fingerprint(post)
-        self.assertNotIn('the', fp)
-        self.assertNotIn('are', fp)
-        self.assertIn('authorities', fp)
-        self.assertIn('hikers', fp)
-        self.assertIn('volcano', fp)
+        self.assertIn("rescue", fp)
+        self.assertIn("singaporeans", fp)
+        self.assertNotIn("the", fp)
+        self.assertNotIn("are", fp)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RUNNER
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     loader = unittest.TestLoader()
